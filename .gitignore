@@ -1,12 +1,32 @@
 __pycache__/
 *.pyc
 .DS_Store
-.env
+*.env
 .venv
 .vscode
-.ipynb_checkpoints
+*.ipynb
 env/
 venv/
-notebooks/reports/*
 !notebooks/reports/.gitkeep
 .python-version
+exports/*
+.idea
+.coverage
+htmlcov
+gamestonk_terminal/reports/stored/*
+gamestonk_terminal/portfolio/portfolios/*
+
+# Jupyter Lab Extension build files
+jupyterlab/*/*.bundle.*
+jupyterlab/*/lib/
+jupyterlab/*/*/labextension/
+jupyterlab/*/node_modules/
+jupyterlab/*/*/node_modules/
+jupyterlab/*/*.egg-info/
+jupyterlab/*/.ipynb_checkpoints
+jupyterlab/*/*.tsbuildinfo
+jupyterlab/*/ui-tests/test-results/
+jupyterlab/*/ui-tests/tests/*.ts-snapshots/
+
+# Sphinx documentation build files
+docs/_build

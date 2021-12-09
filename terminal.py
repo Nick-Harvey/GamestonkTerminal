@@ -1,223 +1,326 @@
 #!/usr/bin/env python
+"""Main Terminal Module"""
+__docformat__ = "numpy"
 
 import argparse
+import sys
 
-from datetime import datetime, timedelta
-import pandas as pd
-from alpha_vantage.timeseries import TimeSeries
 from prompt_toolkit.completion import NestedCompleter
 
-from gamestonk_terminal import config_terminal as cfg
+from gamestonk_terminal import config_terminal
 from gamestonk_terminal import feature_flags as gtff
-from gamestonk_terminal import res_menu as rm
-from gamestonk_terminal.discovery import disc_menu as dm
-from gamestonk_terminal.due_diligence import dd_menu as ddm
-from gamestonk_terminal.fundamental_analysis import fa_menu as fam
-from gamestonk_terminal.helper_funcs import b_is_stock_market_open, get_flair
-from gamestonk_terminal.main_helper import clear, export, load, print_help, view, candle
+from gamestonk_terminal.helper_funcs import (
+    get_flair,
+    system_clear,
+    MENU_RESET,
+    MENU_GO_BACK,
+    MENU_QUIT,
+)
 from gamestonk_terminal.menu import session
-from gamestonk_terminal.papermill import papermill_menu as mill
-from gamestonk_terminal.sentiment import sen_menu as sm
-from gamestonk_terminal.technical_analysis import ta_menu as tam
-from gamestonk_terminal.comparison_analysis import ca_menu as cam
+from gamestonk_terminal.terminal_helper import (
+    about_us,
+    bootup,
+    check_api_keys,
+    print_goodbye,
+    reset,
+    update_terminal,
+)
 
-# import warnings
-# warnings.simplefilter("always")
+# pylint: disable=too-many-public-methods,import-outside-toplevel
 
 
-# pylint: disable=too-many-branches
-def main():
-    """
-    Gamestonk Terminal is an awesome stock market terminal that has been developed for fun,
-    while I saw my GME shares tanking. But hey, I like the stock.
-    """
+class TerminalController:
+    """Terminal Controller class"""
 
-    s_ticker = ""
-    s_start = ""
-    df_stock = pd.DataFrame()
-    s_interval = "1440min"
-
-    # Set stock by default to speed up testing
-    # s_ticker = "BB"
-    # ts = TimeSeries(key=cfg.API_KEY_ALPHAVANTAGE, output_format='pandas')
-    # df_stock, d_stock_metadata = ts.get_daily_adjusted(symbol=s_ticker, outputsize='full')
-    # df_stock.sort_index(ascending=True, inplace=True)
-    # s_start = datetime.strptime("2020-06-04", "%Y-%m-%d")
-    # df_stock = df_stock[s_start:]
-
-    # Add list of arguments that the main parser accepts
-    menu_parser = argparse.ArgumentParser(add_help=False, prog="gamestonk_terminal")
-    choices = [
+    CHOICES = [
+        "cls",
+        "?",
         "help",
-        "quit",
         "q",
-        "clear",
-        "load",
-        "candle",
-        "view",
-        "export",
-        "disc",
-        "mill",
-        "sen",
-        "res",
-        "fa",
-        "ta",
-        "dd",
-        "pred",
-        "ca",
+        "quit",
     ]
-    menu_parser.add_argument("opt", choices=choices)
-    completer = NestedCompleter.from_nested_dict({c: None for c in choices})
 
-    # Print first welcome message and help
-    print("\nWelcome to Gamestonk Terminal 🚀\n")
-    should_print_help = True
+    CHOICES_COMMANDS = [
+        "reset",
+        "update",
+        "about",
+        "keys",
+    ]
 
-    # Loop forever and ever
-    while True:
-        main_cmd = False
-        if should_print_help:
-            print_help(s_ticker, s_start, s_interval, b_is_stock_market_open())
-            should_print_help = False
+    CHOICES_SHORTHAND_MENUS = ["s", "e", "c", "p", "f", "rp", "rs"]
+    CHOICES_MENUS = [
+        "stocks",
+        "economy",
+        "crypto",
+        "portfolio",
+        "forex",
+        "etf",
+        "reports",
+        "resources",
+    ]
 
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            as_input = session.prompt(f"{get_flair()}> ", completer=completer)
-        else:
-            as_input = input(f"{get_flair()}> ")
+    CHOICES += CHOICES_COMMANDS
+    CHOICES += CHOICES_MENUS
+    CHOICES += CHOICES_SHORTHAND_MENUS
 
-        # Is command empty
-        if not as_input:
+    def __init__(self):
+        """Constructor"""
+        self.update_succcess = False
+        self.t_parser = argparse.ArgumentParser(add_help=False, prog="terminal")
+        self.t_parser.add_argument(
+            "cmd",
+            choices=self.CHOICES,
+        )
+        self.completer = NestedCompleter.from_nested_dict(
+            {c: None for c in self.CHOICES}
+        )
+
+    def print_help(self):
+        """Print help"""
+        help_text = """
+What do you want to do?
+    cls         clear screen
+    ?/help      show this menu again
+    update      update terminal from remote
+    keys        check for defined api keys
+    reset       reset terminal and reload configs
+    about       about us
+    q(uit)      to abandon the program
+
+>>  stocks
+>>  crypto
+>>  etf
+>>  economy
+>>  forex
+>>  portfolio
+>>  reports
+>>  resources
+    """
+        print(help_text)
+
+    def switch(self, an_input: str):
+        """Process and dispatch input
+
+        Returns
+        -------
+        True, False or None
+            False - quit the menu
+            True - quit the program
+            None - continue in the menu
+        """
+
+        # Empty command
+        if not an_input:
             print("")
-            continue
+            return None
 
-        # Parse main command of the list of possible commands
-        try:
-            (ns_known_args, l_args) = menu_parser.parse_known_args(as_input.split())
+        (known_args, other_args) = self.t_parser.parse_known_args(an_input.split())
 
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue
+        # Help menu again
+        if known_args.cmd == "?":
+            self.print_help()
+            return None
 
-        b_quit = False
-        if ns_known_args.opt == "help":
-            should_print_help = True
+        # Clear screen
+        if known_args.cmd == "cls":
+            system_clear()
+            return None
 
-        elif (ns_known_args.opt == "quit") or (ns_known_args.opt == "q"):
-            break
+        return getattr(
+            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
+        )(other_args)
 
-        elif ns_known_args.opt == "clear":
-            s_ticker, s_start, s_interval, df_stock = clear(
-                l_args, s_ticker, s_start, s_interval, df_stock
-            )
-            main_cmd = True
+    def call_help(self, _):
+        """Process Help command"""
+        self.print_help()
 
-        elif ns_known_args.opt == "load":
-            s_ticker, s_start, s_interval, df_stock = load(
-                l_args, s_ticker, s_start, s_interval, df_stock
-            )
-            main_cmd = True
+    def call_quit(self, _):
+        """Process Quit command - quit the program"""
+        return True
 
-        elif ns_known_args.opt == "candle":
-            candle(
-                s_ticker, (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
-            )
+    def call_q(self, _):
+        """Process Quit command - quit the program"""
+        return True
 
-        elif ns_known_args.opt == "view":
-            view(l_args, s_ticker, s_start, s_interval, df_stock)
-            main_cmd = True
+    # COMMANDS
+    def call_reset(self, _):
+        """Process reset command"""
+        return True
 
-        elif ns_known_args.opt == "export":
-            export(l_args, df_stock)
-            main_cmd = True
+    def call_update(self, _):
+        """Process update command"""
+        self.update_succcess = not update_terminal()
+        return True
 
-        elif ns_known_args.opt == "disc":
-            b_quit = dm.disc_menu()
+    def call_keys(self, _):
+        """Process keys command"""
+        check_api_keys()
 
-        elif ns_known_args.opt == "mill":
-            b_quit = mill.papermill_menu()
+    def call_about(self, _):
+        """Process about command"""
+        about_us()
 
-        elif ns_known_args.opt == "sen":
-            b_quit = sm.sen_menu(s_ticker, s_start)
+    # MENUS
+    def call_stocks(self, _):
+        """Process stocks command"""
+        from gamestonk_terminal.stocks import stocks_controller
 
-        elif ns_known_args.opt == "res":
-            b_quit = rm.res_menu(s_ticker, s_start, s_interval)
+        return stocks_controller.menu()
 
-        elif ns_known_args.opt == "ca":
-            b_quit = cam.ca_menu(df_stock, s_ticker, s_start, s_interval)
+    def call_s(self, _):
+        """Process stocks command"""
+        return self.call_stocks(_)
 
-        elif ns_known_args.opt == "fa":
-            b_quit = fam.fa_menu(s_ticker, s_start, s_interval)
+    def call_crypto(self, _):
+        """Process crypto command"""
+        from gamestonk_terminal.cryptocurrency import crypto_controller
 
-        elif ns_known_args.opt == "ta":
-            b_quit = tam.ta_menu(df_stock, s_ticker, s_start, s_interval)
+        return crypto_controller.menu()
 
-        elif ns_known_args.opt == "dd":
-            b_quit = ddm.dd_menu(df_stock, s_ticker, s_start, s_interval)
+    def call_c(self, _):
+        """Process crypto command"""
+        return self.call_crypto(_)
 
-        elif ns_known_args.opt == "pred":
+    def call_economy(self, _):
+        """Process economy command"""
+        from gamestonk_terminal.economy import economy_controller
 
-            if not gtff.ENABLE_PREDICT:
-                print("Predict is not enabled in feature_flags.py")
-                print("Prediction menu is disabled")
-                print("")
-                continue
+        return economy_controller.menu()
 
+    def call_e(self, _):
+        """Process economy command"""
+        return self.call_economy(_)
+
+    def call_etf(self, _):
+        """Process etf command"""
+        from gamestonk_terminal.etf import etf_controller
+
+        return etf_controller.menu()
+
+    def call_forex(self, _):
+        """Process forex command"""
+        from gamestonk_terminal.forex import forex_controller
+
+        return forex_controller.menu()
+
+    def call_f(self, _):
+        """Process forex command"""
+        return self.call_forex(_)
+
+    def call_reports(self, _):
+        """Process reports command"""
+        from gamestonk_terminal.reports import reports_controller
+
+        return reports_controller.menu()
+
+    def call_rp(self, _):
+        """Process reports command"""
+        return self.call_reports(_)
+
+    def call_resources(self, _):
+        """Process resources command"""
+        from gamestonk_terminal.resources import resources_controller
+
+        return resources_controller.menu()
+
+    def call_rs(self, _):
+        """Process resources command"""
+        return self.call_resources(_)
+
+    def call_portfolio(self, _):
+        """Process portfolio command"""
+        from gamestonk_terminal.portfolio import portfolio_controller
+
+        return portfolio_controller.menu()
+
+    def call_p(self, _):
+        """Process portfolio command"""
+        return self.call_portfolio(_)
+
+
+def terminal(menu_prior_to_reset=""):
+    """Terminal Menu"""
+
+    bootup()
+    process_input = False
+    t_controller = TerminalController()
+
+    if config_terminal.DEFAULT_CONTEXT or menu_prior_to_reset:
+        if (
+            config_terminal.DEFAULT_CONTEXT in t_controller.CHOICES_MENUS
+            or menu_prior_to_reset in t_controller.CHOICES_MENUS
+        ):
             try:
-                # pylint: disable=import-outside-toplevel
-                from gamestonk_terminal.prediction_techniques import pred_menu as pm
-            except ModuleNotFoundError as e:
-                print("One of the optional packages seems to be missing")
-                print("Optional packages need to be installed")
-                print(e)
                 print("")
-                continue
-            except Exception as e:
-                print(e)
-                print("")
-                continue
+                process_input = t_controller.switch(
+                    menu_prior_to_reset or config_terminal.DEFAULT_CONTEXT.lower()
+                )
+                # Check if the user wants to reset application
+                if process_input == MENU_RESET:
+                    ret_code = reset(menu_prior_to_reset)
+                    if ret_code != 0:
+                        print_goodbye()
 
-            if s_interval == "1440min":
-                b_quit = pm.pred_menu(df_stock, s_ticker, s_start, s_interval)
-            # If stock data is intradaily, we need to get data again as prediction
-            # techniques work on daily adjusted data. By default we load data from
-            # Alpha Vantage because the historical data loaded gives a larger
-            # dataset than the one provided by quandl
+            except SystemExit:
+                print("")
+        else:
+            print("\nInvalid DEFAULT_CONTEXT config selected!", "\n")
+
+    if process_input not in (MENU_QUIT, MENU_RESET):
+        t_controller.print_help()
+
+        while True:
+            if gtff.ENABLE_QUICK_EXIT:
+                print("Quick exit enabled")
+                break
+
+            if session and gtff.USE_PROMPT_TOOLKIT:
+                an_input = session.prompt(
+                    f"{get_flair()}> ", completer=t_controller.completer
+                )
+
             else:
-                try:
-                    ts = TimeSeries(
-                        key=cfg.API_KEY_ALPHAVANTAGE, output_format="pandas"
-                    )
-                    # pylint: disable=unbalanced-tuple-unpacking
-                    df_stock_pred, _ = ts.get_daily_adjusted(
-                        symbol=s_ticker, outputsize="full"
-                    )
-                    # pylint: disable=no-member
-                    df_stock_pred = df_stock_pred.sort_index(ascending=True)
-                    df_stock_pred = df_stock_pred[s_start:]
-                    b_quit = pm.pred_menu(
-                        df_stock_pred, s_ticker, s_start, s_interval="1440min"
-                    )
-                except Exception as e:
-                    print(e)
-                    print("Either the ticker or the API_KEY are invalids. Try again!")
-                    b_quit = False
-                    return
+                an_input = input(f"{get_flair()}> ")
 
-        else:
-            print("Shouldn't see this command!")
-            continue
+            # Is command empty
+            if not an_input:
+                print("")
+                continue
 
-        if b_quit:
-            break
-        else:
-            if not main_cmd:
-                should_print_help = True
+            # Process list of commands selected by user
+            try:
+                process_input = t_controller.switch(an_input)
+                # MENU_GO_BACK - Show main context menu again
+                # MENU_QUIT - Quit terminal
+                # MENU_RESET - Reset terminal and go back to same previous menu
 
-    print(
-        "Hope you enjoyed the terminal. Remember that stonks only go up. Diamond hands.\n"
-    )
+                if process_input == MENU_GO_BACK:
+                    t_controller.print_help()
+                elif process_input in (MENU_QUIT, MENU_RESET):
+                    break
+
+            except SystemExit:
+                print("The command selected doesn't exist\n")
+                continue
+
+        if not gtff.ENABLE_QUICK_EXIT:
+            # Check if the user wants to reset application
+            if (
+                an_input == "reset"
+                or t_controller.update_succcess
+                or process_input == MENU_RESET
+            ):
+                ret_code = reset(an_input if an_input != "reset" else "")
+                if ret_code != 0:
+                    print_goodbye()
+            else:
+                print_goodbye()
+    else:
+        print_goodbye()
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        terminal(sys.argv[1])
+    else:
+        terminal()
