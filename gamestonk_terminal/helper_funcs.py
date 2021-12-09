@@ -542,16 +542,17 @@ def parse_known_args_and_warn(
     )
     if export_allowed > NO_EXPORT:
         choices_export = []
-        help_export = "Export "
+        help_export = "Does not export!"
 
         if export_allowed == EXPORT_ONLY_RAW_DATA_ALLOWED:
-            choices_export += ["csv", "json", "xlsx"]
-            help_export += "raw data into csv, json, xlsx "
-        if export_allowed > EXPORT_ONLY_RAW_DATA_ALLOWED:
-            choices_export += ["png", "jpg", "pdf", "svg"]
-            if export_allowed == EXPORT_BOTH_RAW_DATA_AND_FIGURES:
-                help_export += "or "
-            help_export += "figure into png, jpg, pdf, svg "
+            choices_export = ["csv", "json", "xlsx"]
+            help_export = "Export raw data into csv, json, xlsx"
+        elif export_allowed == EXPORT_ONLY_FIGURES_ALLOWED:
+            choices_export = ["png", "jpg", "pdf", "svg"]
+            help_export = "Export figure into png, jpg, pdf, svg "
+        else:
+            choices_export = ["csv", "json", "xlsx", "png", "jpg", "pdf", "svg"]
+            help_export = "Export raw data into csv, json, xlsx and figure into png, jpg, pdf, svg "
 
         parser.add_argument(
             "--export",
@@ -707,7 +708,7 @@ def export_data(
     func_name : str
         Name of the command that invokes this function
     df : pd.Dataframe
-        Datframe containing the data
+        Dataframe of data to save
     """
     if export_type:
         export_dir = dir_path.replace("gamestonk_terminal", "exports")

@@ -1,19 +1,18 @@
 import asyncio
 import discord
-import config_discordbot as cfg
 import yfinance as yf
 
-# pylint: disable=wrong-import-order,too-many-branches
-from discordbot import gst_bot
+import discordbot.config_discordbot as cfg
+from discordbot.run_discordbot import gst_bot
 
-from stocks.dark_pool_shorts.shorted import shorted_command
-from stocks.dark_pool_shorts.ftd import ftd_command
-from stocks.dark_pool_shorts.dpotc import dpotc_command
-from stocks.dark_pool_shorts.spos import spos_command
-from stocks.dark_pool_shorts.psi import psi_command
-from stocks.dark_pool_shorts.hsi import hsi_command
-from stocks.dark_pool_shorts.pos import pos_command
-from stocks.dark_pool_shorts.sidtc import sidtc_command
+from discordbot.stocks.dark_pool_shorts.shorted import shorted_command
+from discordbot.stocks.dark_pool_shorts.ftd import ftd_command
+from discordbot.stocks.dark_pool_shorts.dpotc import dpotc_command
+from discordbot.stocks.dark_pool_shorts.spos import spos_command
+from discordbot.stocks.dark_pool_shorts.psi import psi_command
+from discordbot.stocks.dark_pool_shorts.hsi import hsi_command
+from discordbot.stocks.dark_pool_shorts.pos import pos_command
+from discordbot.stocks.dark_pool_shorts.sidtc import sidtc_command
 
 
 class DarkPoolShortsCommands(discord.ext.commands.Cog):
@@ -122,6 +121,7 @@ class DarkPoolShortsCommands(discord.ext.commands.Cog):
         await psi_command(ctx, ticker)
 
     @discord.ext.commands.command(name="stocks.dps")
+    # pylint: disable=too-many-branches
     async def dark_pool_shorts_menu(self, ctx: discord.ext.commands.Context, ticker=""):
         """Stocks Context - Shows Dark Pool Shorts Menu
 
@@ -169,7 +169,7 @@ class DarkPoolShortsCommands(discord.ext.commands.Cog):
                 "\n!stocks.dps <TICKER>"
             )
 
-        title = "Dark Pool Shorts (DPS) Menu"
+        title = "Stocks: Dark Pool Shorts (DPS) Menu"
         embed = discord.Embed(title=title, description=text, colour=cfg.COLOR)
         embed.set_author(
             name=cfg.AUTHOR_NAME,
@@ -229,11 +229,17 @@ class DarkPoolShortsCommands(discord.ext.commands.Cog):
                 await msg.remove_reaction(emoji, ctx.bot.user)
 
         except asyncio.TimeoutError:
-            text = text + "\n\nCommand timeout."
-            embed = discord.Embed(title=title, description=text)
-            await msg.edit(embed=embed)
             for emoji in emoji_list:
                 await msg.remove_reaction(emoji, ctx.bot.user)
+            embed = discord.Embed(
+                description="Error timeout - you snooze you lose! 😋",
+                colour=cfg.COLOR,
+                title="TIMEOUT Stocks: Dark Pool Shorts (DPS) Menu",
+            ).set_author(
+                name=cfg.AUTHOR_NAME,
+                icon_url=cfg.AUTHOR_ICON_URL,
+            )
+            await ctx.send(embed=embed)
 
 
 def setup(bot: discord.ext.commands.Bot):

@@ -1,19 +1,19 @@
 import asyncio
 import discord
-import config_discordbot as cfg
 
-# pylint: disable=wrong-import-order
-from discordbot import gst_bot
+import discordbot.config_discordbot as cfg
 
-from economy.feargreed import feargreed_command
-from economy.overview import overview_command
-from economy.indices import indices_command
-from economy.futures import futures_command
-from economy.usbonds import usbonds_command
-from economy.glbonds import glbonds_command
-from economy.currencies import currencies_command
-from economy.valuation import valuation_command
-from economy.performance import performance_command
+from discordbot.run_discordbot import gst_bot
+
+from discordbot.economy.feargreed import feargreed_command
+from discordbot.economy.overview import overview_command
+from discordbot.economy.indices import indices_command
+from discordbot.economy.futures import futures_command
+from discordbot.economy.usbonds import usbonds_command
+from discordbot.economy.glbonds import glbonds_command
+from discordbot.economy.currencies import currencies_command
+from discordbot.economy.valuation import valuation_command
+from discordbot.economy.performance import performance_command
 
 
 class EconomyCommands(discord.ext.commands.Cog):
@@ -177,11 +177,17 @@ class EconomyCommands(discord.ext.commands.Cog):
                 await msg.remove_reaction(emoji, ctx.bot.user)
 
         except asyncio.TimeoutError:
-            text = text + "\n\nCOMMAND TIMEOUT."
-            embed = discord.Embed(title=title, description=text)
-            await msg.edit(embed=embed)
             for emoji in emoji_list:
                 await msg.remove_reaction(emoji, ctx.bot.user)
+            embed = discord.Embed(
+                description="Error timeout - you snooze you lose! 😋",
+                colour=cfg.COLOR,
+                title="TIMEOUT Economy Menu",
+            ).set_author(
+                name=cfg.AUTHOR_NAME,
+                icon_url=cfg.AUTHOR_ICON_URL,
+            )
+            await ctx.send(embed=embed)
 
 
 def setup(bot: discord.ext.commands.Bot):

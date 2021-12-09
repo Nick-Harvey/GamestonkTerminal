@@ -2,6 +2,7 @@
 __docformat__ = "numpy"
 
 import argparse
+import difflib
 from typing import List
 from datetime import datetime, timedelta
 from colorama import Style
@@ -9,7 +10,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from prompt_toolkit.completion import NestedCompleter
 from gamestonk_terminal import feature_flags as gtff
-from gamestonk_terminal.helper_funcs import get_flair
+from gamestonk_terminal.helper_funcs import EXPORT_BOTH_RAW_DATA_AND_FIGURES, get_flair
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.helper_funcs import (
     parse_known_args_and_warn,
@@ -19,7 +20,7 @@ from gamestonk_terminal.helper_funcs import (
     try_except,
     system_clear,
 )
-from gamestonk_terminal.stocks.stocks_helper import load
+from gamestonk_terminal.stocks import stocks_helper
 from gamestonk_terminal.stocks.dark_pool_shorts import (
     yahoofinance_view,
     stockgrid_view,
@@ -27,6 +28,7 @@ from gamestonk_terminal.stocks.dark_pool_shorts import (
     quandl_view,
     sec_view,
     finra_view,
+    nyse_view,
 )
 
 
@@ -51,12 +53,7 @@ class DarkPoolShortsController:
         "sidtc",
     ]
 
-    CHOICES_COMMANDS_WITH_TICKER = [
-        "psi",
-        "dpotc",
-        "ftd",
-        "spos",
-    ]
+    CHOICES_COMMANDS_WITH_TICKER = ["psi", "dpotc", "ftd", "spos", "volexch"]
 
     CHOICES += CHOICES_COMMANDS
     CHOICES += CHOICES_COMMANDS_WITH_TICKER
@@ -103,11 +100,14 @@ Stockgrid:
     spos           net short vs position
 Quandl/Stockgrid:
     psi            price vs short interest volume
+NYSE:
+    volexch        short volume for ARCA,Amex,Chicago,NYSE and national exchanges
 {Style.RESET_ALL if not self.ticker else ''}"""
         print(help_text)
 
     def switch(self, an_input: str):
         """Process and dispatch input
+
         Returns
         -------
         True, False or None
@@ -150,9 +150,50 @@ Quandl/Stockgrid:
 
     def call_load(self, other_args: List[str]):
         """Process load command"""
-        self.ticker, self.start, _, self.stock = load(
-            other_args, self.ticker, self.start, "1440min", self.stock
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="load",
+            description="Load stock ticker to perform analysis on. When the data source is 'yf', an Indian ticker can be"
+            " loaded by using '.NS' at the end, e.g. 'SBIN.NS'. See available market in"
+            " https://help.yahoo.com/kb/exchanges-data-providers-yahoo-finance-sln2310.html.",
         )
+        parser.add_argument(
+            "-t",
+            "--ticker",
+            action="store",
+            dest="ticker",
+            required="-h" not in other_args,
+            help="Stock ticker",
+        )
+        parser.add_argument(
+            "-s",
+            "--start",
+            type=valid_date,
+            default=(datetime.now() - timedelta(days=366)).strftime("%Y-%m-%d"),
+            dest="start",
+            help="The starting date (format YYYY-MM-DD) of the stock",
+        )
+        # For the case where a user uses: 'load BB'
+        if other_args and "-t" not in other_args and "-h" not in other_args:
+            other_args.insert(0, "-t")
+
+        ns_parser = parse_known_args_and_warn(parser, other_args)
+        if not ns_parser:
+            return
+
+        df_stock_candidate = stocks_helper.load(
+            ns_parser.ticker,
+            ns_parser.start,
+        )
+
+        if not df_stock_candidate.empty:
+            self.stock = df_stock_candidate
+            self.start = ns_parser.start
+            if "." in ns_parser.ticker:
+                self.ticker = ns_parser.ticker.upper().split(".")[0]
+            else:
+                self.ticker = ns_parser.ticker.upper()
 
     @try_except
     def call_shorted(self, other_args: List[str]):
@@ -591,6 +632,63 @@ Quandl/Stockgrid:
                 export=ns_parser.export,
             )
 
+    @try_except
+    def call_volexch(self, other_args: List[str]):
+        """Process volexch command"""
+        parser = argparse.ArgumentParser(
+            prog="volexch",
+            add_help=False,
+            description="Displays short volume based on exchange.",
+        )
+        parser.add_argument(
+            "--raw",
+            help="Display raw data",
+            dest="raw",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
+            "-s",
+            "--sort",
+            help="Column to sort by",
+            dest="sort",
+            type=str,
+            default="",
+            choices=["", "NetShort", "Date", "TotalVolume", "PctShort"],
+        )
+        parser.add_argument(
+            "-a",
+            "--asc",
+            help="Sort in ascending order",
+            dest="asc",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
+            "-m",
+            "--mpl",
+            help="Display plot using matplotlb.",
+            dest="mpl",
+            action="store_true",
+            default=False,
+        )
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+        if not ns_parser:
+            return
+        if not self.ticker:
+            print("No ticker loaded.  Use `load ticker` first.")
+            return
+        nyse_view.display_short_by_exchange(
+            ticker=self.ticker,
+            raw=ns_parser.raw,
+            sort=ns_parser.sort,
+            asc=ns_parser.asc,
+            mpl=ns_parser.mpl,
+            export=ns_parser.export,
+        )
+
 
 def menu(ticker: str = "", start: str = "", stock: pd.DataFrame = pd.DataFrame()):
     """Dark Pool Shorts Menu
@@ -632,4 +730,10 @@ def menu(ticker: str = "", start: str = "", stock: pd.DataFrame = pd.DataFrame()
 
         except SystemExit:
             print("The command selected doesn't exist\n")
+            similar_cmd = difflib.get_close_matches(
+                an_input, dps_controller.CHOICES, n=1, cutoff=0.7
+            )
+
+            if similar_cmd:
+                print(f"Did you mean '{similar_cmd[0]}'?\n")
             continue

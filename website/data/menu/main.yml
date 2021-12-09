@@ -3,6 +3,8 @@ main:
   - name: stocks
     ref: "/stocks"
     sub:
+      - name: search
+        ref: "/stocks/search"
       - name: load
         ref: "/stocks/load"
       - name: candle
@@ -50,6 +52,39 @@ main:
             ref: "/stocks/discovery/hotpenny"
           - name: fds
             ref: "/stocks/discovery/fds"
+          - name: rtat
+            ref: "/stocks/discovery/rtat"
+      - name: Sector and Industry Analysis (SIA)
+        ref: "/stocks/sia"
+        sub:
+          - name: load
+            ref: "/stocks/sia/load"
+          - name: clear
+            ref: "/stocks/sia/clear"
+          - name: industry
+            ref: "/stocks/sia/industry"
+          - name: sector
+            ref: "/stocks/sia/sector"
+          - name: country
+            ref: "/stocks/sia/country"
+          - name: mktcap
+            ref: "/stocks/sia/mktcap"
+          - name: exchange
+            ref: "/stocks/sia/exchange"
+          - name: cps
+            ref: "/stocks/sia/cps"
+          - name: cpic
+            ref: "/stocks/sia/cpic"
+          - name: cpis
+            ref: "/stocks/sia/cpis"
+          - name: cpcs
+            ref: "/stocks/sia/cpcs"
+          - name: cpci
+            ref: "/stocks/sia/cpci"
+          - name: sama
+            ref: "/stocks/sia/sama"
+          - name: metric
+            ref: "/stocks/sia/metric"            
       - name: dark pool shorts
         ref: "/stocks/dark_pool_shorts"
         sub:
@@ -71,6 +106,8 @@ main:
             ref: "/stocks/dark_pool_shorts/spos"
           - name: psi
             ref: "/stocks/dark_pool_shorts/psi"
+          - name: volexch
+            ref: "/stocks/dark_pool_shorts/volexch"
       - name: screener
         ref: "/stocks/screener"
         sub:
@@ -175,8 +212,6 @@ main:
       - name: fundamental analysis
         ref: "/stocks/fundamental_analysis"
         sub:
-          - name: screener
-            ref: "/stocks/fundamental_analysis/screener"
           - name: mgmt
             ref: "/stocks/fundamental_analysis/mgmt"
           - name: analysis
@@ -199,6 +234,8 @@ main:
             ref: "/stocks/fundamental_analysis/web"
           - name: hq
             ref: "/stocks/fundamental_analysis/hq"
+          - name: divs
+            ref: "/stocks/fundamental_analysis/divs"
           - name: overview
             ref: "/stocks/fundamental_analysis/overview"
           - name: key
@@ -385,6 +422,8 @@ main:
             ref: "/portfolio/portfolio_optimization"
           - name: parity
             ref: "/stocks/options/parity"
+          - name: binom
+            ref: "/stocks/options/binom"
           - name: payoff
             ref: "/stocks/options/payoff"
             sub:
@@ -663,9 +702,23 @@ main:
             ref: "/cryptocurrency/overview/cpcontracts"
           - name: cbpairs
             ref: "/cryptocurrency/overview/cbpairs"
+          - name: news
+            ref: "/cryptocurrency/overview/news"
+          - name: wf
+            ref: "/cryptocurrency/overview/wf"
+          - name: ewf
+            ref: "/cryptocurrency/overview/ewf"
+          - name: wfpe
+            ref: "/cryptocurrency/overview/wfpe"
       - name: due diligence
         ref: "/cryptocurrency/due_diligence"
         sub:
+          - name: active
+            ref: "/cryptocurrency/due_diligence/active"
+          - name: change
+            ref: "/cryptocurrency/due_diligence/change"
+          - name: eb
+            ref: "/cryptocurrency/due_diligence/eb"
           - name: oi
             ref: "/cryptocurrency/due_diligence/oi"
           - name: info
@@ -713,8 +766,6 @@ main:
         sub:
           - name: gwei
             ref: "/cryptocurrency/onchain/gwei"
-          - name: active
-            ref: "/cryptocurrency/onchain/active"
       - name: nft
         ref: "/cryptocurrency/nft"
         sub:
@@ -822,10 +873,19 @@ main:
         ref: "/economy/tyld"
       - name: unemp
         ref: "/economy/unemp"
-      - name: search
-        ref: "/economy/search"
-      - name: series
-        ref: "/economy/series"
+      - name: bigmac
+        ref: "/economy/bigmac"
+      - name: fred
+        ref: "/economy/fred"
+        sub:
+          - name: search
+            ref : "/economy/fred/search"
+          - name: add
+            ref: "/economy/fred/add"
+          - name: rmv
+            ref: "/economy/fred/rmv"
+          - name: plot
+            ref: "/economy/fred/plot"
   - name: etf
     ref: "/etf"
     sub:

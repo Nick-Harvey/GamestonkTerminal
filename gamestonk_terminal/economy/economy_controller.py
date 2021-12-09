@@ -2,10 +2,12 @@
 __docformat__ = "numpy"
 # pylint:disable=too-many-lines
 import argparse
+import difflib
 from datetime import datetime, timedelta
 import os
 from typing import List
 
+import pandas as pd
 from prompt_toolkit.completion import NestedCompleter
 
 from gamestonk_terminal import feature_flags as gtff
@@ -14,8 +16,9 @@ from gamestonk_terminal.economy import (
     cnn_view,
     finnhub_view,
     finviz_view,
-    fred_view,
+    nasdaq_model,
     wsj_view,
+    nasdaq_view,
 )
 from gamestonk_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
@@ -31,7 +34,7 @@ from gamestonk_terminal.helper_funcs import (
 )
 from gamestonk_terminal.menu import session
 
-# pylint: disable=R1710,R0904
+# pylint: disable=R1710,R0904,C0415
 
 
 class EconomyController:
@@ -63,10 +66,10 @@ class EconomyController:
         "quit",
         "reset",
     ]
+    CHOICES_MENUS = ["fred"]
 
     CHOICES_COMMANDS = [
         "feargreed",
-        "events",
         "overview",
         "indices",
         "futures",
@@ -79,8 +82,6 @@ class EconomyController:
         "meats",
         "grains",
         "softs",
-        "search",
-        "series",
         "valuation",
         "performance",
         "spectrum",
@@ -93,9 +94,10 @@ class EconomyController:
         "tyld",
         "unemp",
         "industry",
+        "bigmac",
     ]
 
-    CHOICES += CHOICES_COMMANDS
+    CHOICES += CHOICES_COMMANDS + CHOICES_MENUS
 
     def __init__(self):
         """Constructor"""
@@ -118,8 +120,6 @@ What do you want to do?
 
 CNN:
     feargreed     CNN Fear and Greed Index
-Finnhub:
-    events        economic impact events
 Wall St. Journal:
     overview      market data overview
     indices       US indices overview
@@ -145,9 +145,10 @@ Alpha Vantage:
     cpi           consumer price index for United States
     tyld          treasury yields for United States
     unemp         United States unemployment rates
-FRED:
-    search        search FRED series notes
-    series        plot series from https://fred.stlouisfed.org
+NASDAQ DataLink (formerly Quandl):
+    bigmac        the economists Big Mac index
+
+>   fred          Federal Reserve Economic Data submenu
 """
         print(help_text)
 
@@ -466,6 +467,22 @@ FRED:
             description="Energy future overview. [Source: Finviz]",
         )
         parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=["ticker", "last", "change", "prevClose"],
+            default="ticker",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
             "--export",
             choices=["csv", "json", "xlsx"],
             default="",
@@ -479,6 +496,8 @@ FRED:
 
         finviz_view.display_future(
             future_type="Energy",
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -490,6 +509,22 @@ FRED:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="metals",
             description="Metals future overview. [Source: Finviz]",
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=["ticker", "last", "change", "prevClose"],
+            default="ticker",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -505,6 +540,8 @@ FRED:
 
         finviz_view.display_future(
             future_type="Metals",
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -516,6 +553,22 @@ FRED:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="meats",
             description="Meats future overview. [Source: Finviz]",
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=["ticker", "last", "change", "prevClose"],
+            default="ticker",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -531,6 +584,8 @@ FRED:
 
         finviz_view.display_future(
             future_type="Meats",
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -542,6 +597,22 @@ FRED:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="grains",
             description="Grains future overview. [Source: Finviz]",
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=["ticker", "last", "change", "prevClose"],
+            default="ticker",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -557,6 +628,8 @@ FRED:
 
         finviz_view.display_future(
             future_type="Grains",
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -568,6 +641,22 @@ FRED:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="softs",
             description="Softs future overview. [Source: Finviz]",
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=["ticker", "last", "change", "prevClose"],
+            default="ticker",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -583,6 +672,8 @@ FRED:
 
         finviz_view.display_future(
             future_type="Softs",
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -642,10 +733,42 @@ FRED:
             "-g",
             "--group",
             type=str,
-            default="Sector",
+            default="sector",
+            nargs="+",
             dest="group",
             help="Data group (sector, industry or country)",
-            choices=list(self.d_GROUPS.keys()),
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            type=str,
+            choices=[
+                "Name",
+                "MarketCap",
+                "P/E",
+                "FwdP/E",
+                "PEG",
+                "P/S",
+                "P/B",
+                "P/C",
+                "P/FCF",
+                "EPSpast5Y",
+                "EPSnext5Y",
+                "Salespast5Y",
+                "Change",
+                "Volume",
+            ],
+            default="Name",
+            help="Column to sort by",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -655,18 +778,22 @@ FRED:
             dest="export",
             help="Export dataframe data to csv,json,xlsx file",
         )
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-g")
-            other_args = [other_args[0], " ".join(other_args[1:])]
+        if other_args and "-" not in other_args[0]:
+            other_args.insert(0, "-g")
 
         ns_parser = parse_known_args_and_warn(parser, other_args)
         if not ns_parser:
             return
 
-        finviz_view.view_group_data(
-            s_group=self.d_GROUPS[ns_parser.group],
-            data_type="valuation",
+        group = (
+            " ".join(ns_parser.group)
+            if isinstance(ns_parser.group, list)
+            else ns_parser.group
+        )
+        finviz_view.display_valuation(
+            s_group=self.d_GROUPS[group],
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -685,10 +812,39 @@ FRED:
             "-g",
             "--group",
             type=str,
-            default="Sector",
+            default="sector",
+            nargs="+",
             dest="group",
             help="Data group (sector, industry or country)",
-            choices=list(self.d_GROUPS.keys()),
+        )
+        parser.add_argument(
+            "-s",
+            "--sortby",
+            dest="sort_col",
+            choices=[
+                "Name",
+                "Week",
+                "Month",
+                "3Month",
+                "6Month",
+                "1Year",
+                "YTD",
+                "Recom",
+                "AvgVolume",
+                "RelVolume",
+                "Change",
+                "Volume",
+            ],
+            default="Name",
+            help="Column to sort by",
+        )
+        parser.add_argument(
+            "-a",
+            "-ascend",
+            dest="ascend",
+            help="Flag to sort in ascending order",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--export",
@@ -698,18 +854,20 @@ FRED:
             dest="export",
             help="Export dataframe data to csv,json,xlsx file",
         )
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-g")
-            other_args = [other_args[0], " ".join(other_args[1:])]
-
+        if other_args and "-" not in other_args[0]:
+            other_args.insert(0, "-g")
         ns_parser = parse_known_args_and_warn(parser, other_args)
         if not ns_parser:
             return
-
-        finviz_view.view_group_data(
-            s_group=self.d_GROUPS[ns_parser.group],
-            data_type="performance",
+        group = (
+            " ".join(ns_parser.group)
+            if isinstance(ns_parser.group, list)
+            else ns_parser.group
+        )
+        finviz_view.display_performance(
+            s_group=self.d_GROUPS[group],
+            sort_col=ns_parser.sort_col,
+            ascending=ns_parser.ascend,
             export=ns_parser.export,
         )
 
@@ -729,9 +887,9 @@ FRED:
             "--group",
             type=str,
             default="sector",
+            nargs="+",
             dest="group",
             help="Data group (sector, industry or country)",
-            choices=list(self.d_GROUPS.keys()),
         )
         parser.add_argument(
             "--export",
@@ -741,23 +899,22 @@ FRED:
             dest="export",
             help="Export plot to png,jpg,pdf,svg file",
         )
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-g")
-            other_args = [other_args[0], " ".join(other_args[1:])]
+        if other_args and "-" not in other_args[0]:
+            other_args.insert(0, "-g")
 
         ns_parser = parse_known_args_and_warn(parser, other_args)
         if not ns_parser:
             return
-
-        finviz_view.view_group_data(
-            s_group=self.d_GROUPS[ns_parser.group],
-            data_type="spectrum",
-            export="",
+        group = (
+            " ".join(ns_parser.group)
+            if isinstance(ns_parser.group, list)
+            else ns_parser.group
         )
+        finviz_view.display_spectrum(s_group=self.d_GROUPS[group])
+
         # Due to Finviz implementation of Spectrum, we delete the generated spectrum figure
         # after saving it and displaying it to the user
-        os.remove(ns_parser.group + ".jpg")
+        os.remove(self.d_GROUPS[group] + ".jpg")
 
     @try_except
     def call_rtps(self, other_args: List[str]):
@@ -1019,6 +1176,8 @@ FRED:
             default=False,
         )
 
+        if other_args and "-m" not in other_args[0]:
+            other_args.insert(0, "-m")
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
@@ -1075,100 +1234,65 @@ FRED:
         )
 
     @try_except
-    def call_series(self, other_args: List[str]):
-        """Process series command"""
+    def call_bigmac(self, other_args: List[str]):
+        """Process bigmac command"""
         parser = argparse.ArgumentParser(
             add_help=False,
-            prog="series",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="bigmac",
             description="""
-                Display (multiple) series from https://fred.stlouisfed.org. [Source: FRED]
+                Get historical Big Mac Index [Nasdaq Data Link]
             """,
         )
         parser.add_argument(
-            "-i",
-            "--id",
-            dest="series_id",
-            required="-h" not in other_args,
-            type=str,
-            help="FRED Series from https://fred.stlouisfed.org. For multiple series use: series1,series2,series3",
+            "--codes",
+            help="Flag to show all country codes",
+            dest="codes",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
-            "-s",
-            dest="start_date",
-            type=valid_date,
-            default="2019-01-01",
-            help="Starting date (YYYY-MM-DD) of data",
+            "-c",
+            "--countries",
+            help="Country codes to get data for.",
+            dest="countries",
+            default="USA",
+            type=nasdaq_model.check_country_code_type,
         )
         parser.add_argument(
             "--raw",
             action="store_true",
+            default=False,
+            help="Show raw data",
             dest="raw",
-            help="Only output raw data",
         )
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"]
-            if "--raw" in other_args
-            else ["png", "jpg", "pdf", "svg"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export data to csv,json,xlsx or png,jpg,pdf,svg file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-i")
-
-        ns_parser = parse_known_args_and_warn(parser, other_args)
         if not ns_parser:
             return
 
-        fred_view.display_series(
-            series=ns_parser.series_id,
-            start_date=ns_parser.start_date,
+        if ns_parser.codes:
+            file = os.path.join(os.path.dirname(__file__), "NASDAQ_CountryCodes.csv")
+            print(pd.read_csv(file, index_col=0).to_string(index=False), "\n")
+            return
+
+        nasdaq_view.display_big_mac_index(
+            country_codes=ns_parser.countries,
             raw=ns_parser.raw,
             export=ns_parser.export,
         )
 
-    @try_except
-    def call_search(self, other_args: List[str]):
-        """Process search command"""
-        parser = argparse.ArgumentParser(
-            add_help=False,
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="search",
-            description="Print series notes when searching for series. [Source: FRED]",
-        )
-        parser.add_argument(
-            "-s",
-            "--series",
-            action="store",
-            dest="series_term",
-            type=str,
-            required="-h" not in other_args,
-            help="Search for this series term.",
-        )
-        parser.add_argument(
-            "-n",
-            "--num",
-            action="store",
-            dest="num",
-            type=check_positive,
-            default=5,
-            help="Maximum number of series notes to display.",
-        )
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-s")
+    def call_fred(self, _):
+        """Process fred command"""
+        from gamestonk_terminal.economy.fred import fred_controller
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        ret = fred_controller.menu()
 
-        fred_view.notes(
-            series_term=ns_parser.series_term,
-            num=ns_parser.num,
-        )
+        if ret is False:
+            self.print_help()
+        else:
+            return True
 
 
 def menu():
@@ -1199,4 +1323,10 @@ def menu():
 
         except SystemExit:
             print("The command selected doesn't exist\n")
+            similar_cmd = difflib.get_close_matches(
+                an_input, econ_controller.CHOICES, n=1, cutoff=0.7
+            )
+
+            if similar_cmd:
+                print(f"Did you mean '{similar_cmd[0]}'?\n")
             continue
