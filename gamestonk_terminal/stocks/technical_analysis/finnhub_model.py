@@ -1,12 +1,19 @@
 """Finnhub model"""
 __docformat__ = "numpy"
 
-import requests
+import logging
+
 import pandas as pd
+import requests
 
 from gamestonk_terminal import config_terminal as cfg
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_pattern_recognition(ticker: str, resolution: str) -> pd.DataFrame:
     """Get pattern recognition data
 
@@ -33,8 +40,8 @@ def get_pattern_recognition(ticker: str, resolution: str) -> pd.DataFrame:
         if "points" in d_data:
             return pd.DataFrame(d_data["points"]).T
         else:
-            print("Response is empty")
+            console.print("Response is empty")
             return pd.DataFrame()
     else:
-        print(f"Error in requests with code: {response.status_code}")
+        console.print(f"Error in requests with code: {response.status_code}")
         return pd.DataFrame()

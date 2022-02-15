@@ -1,11 +1,19 @@
 """ Comparison Analysis FinBrain Model """
 __docformat__ = "numpy"
 
+import logging
 from typing import List
+
 import pandas as pd
 import requests
 
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
 
+logger = logging.getLogger(__name__)
+
+
+@log_start_end(log=logger)
 def get_sentiments(tickers: List[str]) -> pd.DataFrame:
     """Gets Sentiment analysis from several tickers provided by FinBrain's API
 
@@ -33,11 +41,13 @@ def get_sentiments(tickers: List[str]) -> pd.DataFrame:
                 ]
                 dates_sentiment = list(result.json()["sentimentAnalysis"].keys())
             else:
-                print(f"Unexpected data format from FinBrain API for {ticker}")
+                console.print(f"Unexpected data format from FinBrain API for {ticker}")
                 tickers_to_remove.append(ticker)
 
         else:
-            print(f"Request error in retrieving {ticker} sentiment from FinBrain API")
+            console.print(
+                f"Request error in retrieving {ticker} sentiment from FinBrain API"
+            )
             tickers_to_remove.append(ticker)
 
     for ticker in tickers_to_remove:

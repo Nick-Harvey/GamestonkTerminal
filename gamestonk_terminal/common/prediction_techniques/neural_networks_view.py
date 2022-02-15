@@ -1,19 +1,27 @@
 """ Neural Networks View"""
 __docformat__ = "numpy"
 
+import logging
 from typing import Union
+
 import numpy as np
 import pandas as pd
 
+from gamestonk_terminal.common.prediction_techniques import neural_networks_model
 from gamestonk_terminal.common.prediction_techniques.pred_helper import (
     plot_data_predictions,
     print_pretty_prediction,
 )
-from gamestonk_terminal.common.prediction_techniques import neural_networks_model
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
 
 # pylint:disable=too-many-arguments
 
 
+logger = logging.getLogger(__name__)
+
+
+@log_start_end(log=logger)
 def display_mlp(
     dataset: str,
     data: Union[pd.Series, pd.DataFrame],
@@ -93,9 +101,10 @@ def display_mlp(
         n_loops,
         time_res,
     )
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_rnn(
     dataset: str,
     data: Union[pd.Series, pd.DataFrame],
@@ -174,9 +183,10 @@ def display_rnn(
         n_loops,
         time_res,
     )
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_lstm(
     dataset: str,
     data: Union[pd.Series, pd.DataFrame],
@@ -255,9 +265,10 @@ def display_lstm(
         n_loops,
         time_res,
     )
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_conv1d(
     dataset: str,
     data: Union[pd.Series, pd.DataFrame],
@@ -336,4 +347,4 @@ def display_conv1d(
         n_loops,
         time_res,
     )
-    print("")
+    console.print("")

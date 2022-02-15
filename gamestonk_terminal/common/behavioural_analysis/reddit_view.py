@@ -1,21 +1,25 @@
 """Reddit View"""
 __docformat__ = "numpy"
 
+import logging
 import os
 import warnings
 from datetime import datetime
 from typing import Dict
 
 import finviz
+import pandas as pd
 import praw
-from prettytable import PrettyTable
-from tabulate import tabulate
 
-from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.common.behavioural_analysis import reddit_model
-from gamestonk_terminal.helper_funcs import export_data
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def print_and_record_reddit_post(
     submissions_dict: Dict, submission: praw.models.reddit.submission.Submission
 ):
@@ -30,7 +34,7 @@ def print_and_record_reddit_post(
     """
     # Refactor data
     s_datetime = datetime.utcfromtimestamp(submission.created_utc).strftime(
-        "%d/%m/%Y %H:%M:%S"
+        "%Y-%m-%d %H:%M:%S"
     )
     s_link = f"https://old.reddit.com{submission.permalink}"
     s_all_awards = "".join(
@@ -51,25 +55,25 @@ def print_and_record_reddit_post(
         "awards": s_all_awards,
     }
     # Print post data collected so far
-    print(f"{s_datetime} - {submission.title}")
-    print(f"{s_link}")
-    t_post = PrettyTable(
-        ["Subreddit", "Flair", "Score", "# Comments", "Upvote %", "Awards"]
+    console.print(f"{s_datetime} - {submission.title}")
+    console.print(f"{s_link}")
+    columns = ["Subreddit", "Flair", "Score", "# Comments", "Upvote %", "Awards"]
+    data = [
+        submission.subreddit,
+        submission.link_flair_text,
+        submission.score,
+        submission.num_comments,
+        f"{round(100 * submission.upvote_ratio)}%",
+        s_all_awards,
+    ]
+    df = pd.DataFrame(data, columns=columns)
+    print_rich_table(
+        df, headers=list(df.columns), show_index=False, title="Reddit Submission"
     )
-    t_post.add_row(
-        [
-            submission.subreddit,
-            submission.link_flair_text,
-            submission.score,
-            submission.num_comments,
-            f"{round(100 * submission.upvote_ratio)}%",
-            s_all_awards,
-        ]
-    )
-    print(t_post)
-    print("\n")
+    console.print("\n")
 
 
+@log_start_end(log=logger)
 def display_watchlist(num: int):
     """Print other users watchlist. [Source: Reddit]
 
@@ -96,17 +100,18 @@ def display_watchlist(num: int):
                     s_watchlist_tickers += f"{t_ticker[1]} {t_ticker[0]}, "
                 n_tickers += 1
             except Exception:
-                # print(e, "\n")
+                # console.print(e, "\n")
                 pass
         if n_tickers:
-            print(
+            console.print(
                 "The following stock tickers have been mentioned more than once across the previous watchlists:"
             )
-            print(s_watchlist_tickers[:-2] + "\n")
+            console.print(s_watchlist_tickers[:-2] + "\n")
 
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_popular_tickers(
     n_top: int = 10, posts_to_look_at: int = 50, subreddits: str = "", export: str = ""
 ):
@@ -127,22 +132,16 @@ def display_popular_tickers(
         n_top, posts_to_look_at, subreddits
     )
     if not popular_tickers_df.empty:
-        print(f"\nThe following TOP {n_top} tickers have been mentioned:")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    popular_tickers_df,
-                    headers=popular_tickers_df.columns,
-                    tablefmt="fancy_grid",
-                    showindex=False,
-                )
-            )
-        else:
-            print(popular_tickers_df.to_string())
+        print_rich_table(
+            popular_tickers_df,
+            headers=list(popular_tickers_df.columns),
+            show_index=False,
+            title=f"\nThe following TOP {n_top} tickers have been mentioned:",
+        )
     else:
-        print("No tickers found")
+        console.print("No tickers found")
 
-    print("")
+    console.print("")
     export_data(
         export,
         os.path.dirname(os.path.abspath(__file__)),
@@ -151,6 +150,7 @@ def display_popular_tickers(
     )
 
 
+@log_start_end(log=logger)
 def display_spac_community(limit: int = 10, popular: bool = False):
     """Look at tickers mentioned in r/SPACs [Source: Reddit]
 
@@ -180,17 +180,18 @@ def display_spac_community(limit: int = 10, popular: bool = False):
                     s_watchlist_tickers += f"{t_ticker[1]} {t_ticker[0]}, "
                 n_tickers += 1
             except Exception:
-                # print(e, "\n")
+                # console.print(e, "\n")
                 pass
 
         if n_tickers:
-            print(
+            console.print(
                 "The following stock tickers have been mentioned more than once across the previous SPACs:"
             )
-            print(s_watchlist_tickers[:-2])
-    print("")
+            console.print(s_watchlist_tickers[:-2])
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_spac(limit: int = 5):
     """Look at posts containing 'spac' in top communities
 
@@ -221,13 +222,14 @@ def display_spac(limit: int = 5):
             except Exception:
                 pass
         if n_tickers:
-            print(
+            console.print(
                 "The following stock tickers have been mentioned more than once across the previous SPACs:"
             )
-            print(s_watchlist_tickers[:-2])
-    print("")
+            console.print(s_watchlist_tickers[:-2])
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_wsb_community(limit: int = 10, new: bool = False):
     """Show WSB posts
 
@@ -244,6 +246,7 @@ def display_wsb_community(limit: int = 10, new: bool = False):
         print_and_record_reddit_post({}, sub)
 
 
+@log_start_end(log=logger)
 def display_due_diligence(
     ticker: str, limit: int = 10, n_days: int = 3, show_all_flairs: bool = False
 ):
@@ -264,4 +267,4 @@ def display_due_diligence(
     for sub in subs:
         print_and_record_reddit_post({}, sub)
     if not subs:
-        print(f"No DD posts found for {ticker}\n")
+        console.print(f"No DD posts found for {ticker}\n")

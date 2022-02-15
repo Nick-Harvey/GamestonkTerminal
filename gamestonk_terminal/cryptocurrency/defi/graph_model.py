@@ -2,16 +2,55 @@
 __docformat__ = "numpy"
 
 import datetime
-import requests
+import logging
+
 import pandas as pd
+import requests
 
 from gamestonk_terminal.cryptocurrency.dataframe_helpers import (
     very_long_number_formatter,
 )
+from gamestonk_terminal.decorators import log_start_end
+
+logger = logging.getLogger(__name__)
 
 UNI_URL = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2"
 
+SWAPS_FILTERS = ["timestamp", "token0", "token1", "amountUSD"]
 
+POOLS_FILTERS = [
+    "volumeUSD",
+    "token0.name",
+    "token0.symbol",
+    "token1.name",
+    "token1.symbol",
+    "volumeUSD",
+    "txCount",
+]
+
+TOKENS_FILTERS = [
+    "index",
+    "symbol",
+    "name",
+    "tradeVolumeUSD",
+    "totalLiquidity",
+    "txCount",
+]
+
+PAIRS_FILTERS = [
+    "created",
+    "pair",
+    "token0",
+    "token1",
+    "volumeUSD",
+    "txCount",
+    "totalSupply",
+]
+
+# TODO: convert USD values to int. otherwise sort by these columns won't work
+
+
+@log_start_end(log=logger)
 def query_graph(url: str, query: str) -> dict:
     """Helper methods for querying graphql api. [Source: https://thegraph.com/en/]
 
@@ -28,12 +67,13 @@ def query_graph(url: str, query: str) -> dict:
         Dictionary with response data
     """
 
-    request = requests.post(url, json={"query": query})
-    if request.status_code == 200:
-        return request.json()["data"]
+    response = requests.post(url, json={"query": query})
+    if response.status_code == 200:
+        return response.json()["data"]
     return {}
 
 
+@log_start_end(log=logger)
 def get_uni_tokens(skip: int = 0, limit: int = 100) -> pd.DataFrame:
     """Get list of tokens trade-able on Uniswap DEX. [Source: https://thegraph.com/en/]
 
@@ -70,6 +110,7 @@ def get_uni_tokens(skip: int = 0, limit: int = 100) -> pd.DataFrame:
     return pd.DataFrame(data["tokens"]).reset_index()
 
 
+@log_start_end(log=logger)
 def get_uniswap_stats() -> pd.DataFrame:
     """Get base statistics about Uniswap DEX. [Source: https://thegraph.com/en/]
 
@@ -109,6 +150,7 @@ def get_uniswap_stats() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_uniswap_pool_recently_added(
     last_days: int = 14,
     min_volume: int = 100,
@@ -197,6 +239,7 @@ def get_uniswap_pool_recently_added(
     ]
 
 
+@log_start_end(log=logger)
 def get_uni_pools_by_volume() -> pd.DataFrame:
     """Get uniswap pools by volume. [Source: https://thegraph.com/en/]
 
@@ -239,6 +282,7 @@ def get_uni_pools_by_volume() -> pd.DataFrame:
     ]
 
 
+@log_start_end(log=logger)
 def get_last_uni_swaps(limit: int = 100) -> pd.DataFrame:
     """Get the last 100 swaps done on Uniswap [Source: https://thegraph.com/en/]
 

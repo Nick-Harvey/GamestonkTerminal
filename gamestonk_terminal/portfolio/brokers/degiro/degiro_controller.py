@@ -1,26 +1,22 @@
-# IMPORTATION STANDARD
 import argparse
+from typing import List
 
-# IMPORTATION THIRDPARTY
 from prompt_toolkit.completion import NestedCompleter
-
-# IMPORTATION INTERNAL
 import gamestonk_terminal.config_terminal as config
 
 from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
     parse_known_args_and_warn,
-    system_clear,
 )
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.portfolio.brokers.degiro.degiro_view import DegiroView
 
 
-class DegiroController:
-    CHOICES = [
-        "?",
-        "cls",
+class DegiroController(BaseController):
+    """Degiro Controller class"""
+
+    CHOICES_COMMANDS = [
         "cancel",
         "companynews",
         "create",
@@ -30,22 +26,26 @@ class DegiroController:
         "logout",
         "lookup",
         "pending",
-        "q",
-        "quit",
         "topnews",
         "update",
-        "help",
     ]
+    PATH = "/portfolio/bro/degiro/"
 
-    def __init__(self):
+    def __init__(self, queue: List[str] = None):
+        """Constructor"""
+        super().__init__(queue)
+
         self.__degiro_view = DegiroView()
-        self.__degiro_parser = argparse.ArgumentParser(
-            add_help=False,
-            prog="degiro",
-        )
-        self.__degiro_parser.add_argument("cmd", choices=self.CHOICES)
 
-    def cancel(self, l_args):
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def print_help(self):
+        """Print help."""
+        DegiroView.help_display()
+
+    def call_cancel(self, other_args: List[str]):
         """Cancel an order using the `id`."""
 
         # PARSE ARGS
@@ -58,11 +58,11 @@ class DegiroController:
             help="Order's id.",
             type=str,
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.cancel(ns_parser=ns_parser)
 
-    def companynews(self, l_args):
+    def call_companynews(self, other_args: List[str]):
         """Display news related to a company using its ISIN."""
 
         # PARSE ARGS
@@ -75,11 +75,11 @@ class DegiroController:
             type=str,
             help="ISIN code of the company.",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.companynews(ns_parser=ns_parser)
 
-    def create(self, l_args):
+    def call_create(self, other_args: List[str]):
         """Create an order."""
 
         # PARSE ARGS
@@ -117,7 +117,7 @@ class DegiroController:
             "-p",
             "--price",
             help="Price wanted.",
-            required=True,
+            required="-h" not in other_args,
             type=float,
         )
         size_group = parser.add_mutually_exclusive_group(required=True)
@@ -153,15 +153,11 @@ class DegiroController:
             required=False,
             type=str,
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.create(ns_parser=ns_parser)
 
-    def help(self, _):
-        """Show the help menu."""
-        DegiroView.help_display()
-
-    def hold(self, l_args):
+    def call_hold(self, other_args):
         """Display held products."""
 
         # PARSE ARGS
@@ -169,11 +165,11 @@ class DegiroController:
             add_help=False,
             prog="hold",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.hold(ns_parser=ns_parser)
 
-    def lastnews(self, l_args):
+    def call_lastnews(self, other_args: List[str]):
         """Display latest news."""
 
         # PARSE ARGS
@@ -189,11 +185,11 @@ class DegiroController:
             help="Number of news to display.",
             required=False,
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.lastnews(ns_parser=ns_parser)
 
-    def login(self, l_args):
+    def call_login(self, other_args: List[str]):
         """Connect to Degiro's API."""
 
         # PARSE ARGS
@@ -229,11 +225,11 @@ class DegiroController:
             default=None,
             help="TOTP SECRET (2FA).",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.login(ns_parser=ns_parser)
 
-    def logout(self, l_args):
+    def call_logout(self, other_args: List[str]):
         """Log out from Degiro's API."""
 
         # PARSE ARGS
@@ -241,11 +237,11 @@ class DegiroController:
             add_help=False,
             prog="logout",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.logout(ns_parser=ns_parser)
 
-    def lookup(self, l_args):
+    def call_lookup(self, other_args: List[str]):
         """Search for products by their name."""
 
         # PARSING ARGS
@@ -272,11 +268,11 @@ class DegiroController:
             default=0,
             help="To use an offset.",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.lookup(ns_parser=ns_parser)
 
-    def pending(self, l_args):
+    def call_pending(self, other_args: List[str]):
         """Display pending orders."""
 
         # PARSING ARGS
@@ -284,19 +280,11 @@ class DegiroController:
             add_help=False,
             prog="pending",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.pending(ns_parser=ns_parser)
 
-    def q(self, _):
-        """Process Q command - quit the menu."""
-        return False
-
-    def quit(self, _):
-        """Process Quit command - quit the program."""
-        return True
-
-    def topnews(self, l_args):
+    def call_topnews(self, other_args: List[str]):
         """Display top news."""
 
         # PARSING ARGS
@@ -304,11 +292,11 @@ class DegiroController:
             add_help=False,
             prog="topnews",
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.topnews(ns_parser=ns_parser)
 
-    def update(self, l_args):
+    def call_update(self, other_args: List[str]):
         """Update an order."""
 
         # PARSING ARGS
@@ -325,82 +313,9 @@ class DegiroController:
             "-p",
             "--price",
             help="Price wanted.",
-            required=True,
+            required="-h" not in other_args,
             type=float,
         )
-        ns_parser = parse_known_args_and_warn(parser, l_args)
+        ns_parser = parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.update(ns_parser=ns_parser)
-
-    def switch(self, an_input: str):
-        """Process and dispatch input
-
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        try:
-            degiro_parser = self.__degiro_parser
-
-            # Empty command
-            if not an_input:
-                print("")
-                return None
-
-            (known_args, other_args) = degiro_parser.parse_known_args(an_input.split())
-
-            # Help menu again
-            if known_args.cmd == "?":
-                DegiroView.help_display()
-                return None
-
-            # Clear screen
-            if known_args.cmd == "cls":
-                system_clear()
-                return None
-
-            return getattr(
-                self,
-                known_args.cmd,
-                lambda: "Command not recognized!",
-            )(other_args)
-        except Exception as e:
-            print(e)
-            print("")
-
-            return None
-
-
-def menu():
-    """Degiro Menu"""
-
-    # SETUP CONTROLLER
-    degiro_controller = DegiroController()
-    degiro_controller.help(None)
-
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in degiro_controller.CHOICES}
-            )
-            an_input = session.prompt(
-                f"{get_flair()} (bro)>(degiro)> ",
-                completer=completer,
-            )
-        else:
-            an_input = input(f"{get_flair()} (bro)>(degiro)> ")
-
-        try:
-            process_input = degiro_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue

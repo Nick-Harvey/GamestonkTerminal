@@ -1,16 +1,21 @@
 """ Seeking Alpha View """
 __docformat__ = "numpy"
 
-from typing import List
+import logging
 import os
-from datetime import datetime
-from tabulate import tabulate
-import pandas as pd
-from gamestonk_terminal.helper_funcs import export_data
+from typing import List
 
+import pandas as pd
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.discovery import seeking_alpha_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: str):
     """Displays upcoming earnings release dates
 
@@ -54,14 +59,11 @@ def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: st
         df_earn.index = df_earn["Ticker"].values
         df_earn.drop(columns=["Ticker"], inplace=True)
 
-        print(
-            tabulate(
-                df_earn,
-                showindex=True,
-                headers=[f"Earnings on {earning_date.date()}"],
-                tablefmt="fancy_grid",
-            ),
-            "\n",
+        print_rich_table(
+            df_earn,
+            show_index=True,
+            headers=[f"Earnings on {earning_date.date()}"],
+            title="Upcoming Earnings Releases",
         )
 
     if export:
@@ -78,80 +80,69 @@ def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: st
         )
 
 
-def news(news_type: str, article_id: int, num: int, start_date: datetime, export: str):
+@log_start_end(log=logger)
+def news(article_id: int, num: int, export: str):
     """Prints the latest news article list. [Source: Seeking Alpha]
 
     Parameters
     ----------
-    news_type: str
-        Select between 'latest' or 'trending'
     article_id: int
         Article ID. If -1, none is selected
     num: int
         Number of articles to display. Only used if article_id is -1.
-    start_date : datetime
-        Date from when to get articles dates. Only used if article_id is -1.
+
     export : str
         Export dataframe data to csv,json,xlsx file
     """
     # User wants to see all latest news
     if article_id == -1:
-        if news_type == "latest":
-            articles = seeking_alpha_model.get_article_list(start_date, num)
-        elif news_type == "trending":
-            articles = seeking_alpha_model.get_trending_list(num)
-        else:
-            print("Wrong type of news selected", "\n")
+        articles = seeking_alpha_model.get_trending_list(num)
 
         if export:
             df_articles = pd.DataFrame(articles)
 
         for idx, article in enumerate(articles):
-            print(
+            console.print(
                 article["publishedAt"].replace("T", " ").replace("Z", ""),
                 "-",
                 article["id"],
                 "-",
                 article["title"],
             )
-            print(article["url"])
-            print("")
+            console.print(article["url"])
+            console.print("")
 
             if idx >= num - 1:
                 break
 
     # User wants to access specific article
     else:
-        if news_type == "latest":
-            article = seeking_alpha_model.get_article_data(article_id)
-        elif news_type == "trending":
-            article = seeking_alpha_model.get_article_data(article_id)
-        else:
-            print("Wrong type of news selected", "\n")
+        article = seeking_alpha_model.get_article_data(article_id)
 
         if export:
             df_articles = pd.DataFrame(article)
 
-        print(
+        console.print(
             article["publishedAt"][: article["publishedAt"].rfind(":") - 3].replace(
                 "T", " "
             ),
             " ",
             article["title"],
         )
-        print(article["url"])
-        print("")
-        print(article["content"])
+        console.print(article["url"])
+        console.print("")
+        console.print(article["content"])
 
     if export:
         export_data(
             export,
             os.path.dirname(os.path.abspath(__file__)),
-            news_type,
+            "trending",
             df_articles,
         )
 
 
+@log_start_end(log=logger)
 def display_news(news_type: str = "Top-News", num: int = 5, export: str = ""):
     """Display news. [Source: SeekingAlpha]
 
@@ -168,19 +159,19 @@ def display_news(news_type: str = "Top-News", num: int = 5, export: str = ""):
     news_to_display: List = seeking_alpha_model.get_news(news_type, num)
 
     if not news:
-        print("No news found.", "\n")
+        console.print("No news found.", "\n")
 
     else:
         for news_element in news_to_display:
-            print(
+            console.print(
                 news_element["publishOn"]
                 + " - "
                 + news_element["id"]
                 + " - "
                 + news_element["title"]
             )
-            print(news_element["url"])
-            print("")
+            console.print(news_element["url"])
+            console.print("")
 
         export_data(
             export,

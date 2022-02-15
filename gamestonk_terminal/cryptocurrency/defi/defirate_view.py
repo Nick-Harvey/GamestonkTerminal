@@ -1,13 +1,18 @@
 """DeFi Rate View"""
 __docformat__ = "numpy"
 
+import logging
 import os
-from tabulate import tabulate
-from gamestonk_terminal.helper_funcs import export_data
+
 from gamestonk_terminal.cryptocurrency.defi import defirate_model
-from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_funding_rates(top: int, current: bool = True, export: str = "") -> None:
     """Display Funding rates - transfer payments made between long and short positions on perpetual swap futures markets
     [Source: https://defirate.com/]
@@ -26,19 +31,12 @@ def display_funding_rates(top: int, current: bool = True, export: str = "") -> N
 
     df_data = df.copy()
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df.head(top),
-                headers=df.columns,
-                floatfmt=".2f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df.head(top),
+        headers=list(df.columns),
+        show_index=False,
+    )
+    console.print("")
 
     export_data(
         export,
@@ -48,6 +46,7 @@ def display_funding_rates(top: int, current: bool = True, export: str = "") -> N
     )
 
 
+@log_start_end(log=logger)
 def display_lending_rates(top: int, current: bool = True, export: str = "") -> None:
     """Displays top DeFi lendings. Decentralized Finance lending – allows users to supply cryptocurrencies
     in exchange for earning an annualized return
@@ -67,19 +66,13 @@ def display_lending_rates(top: int, current: bool = True, export: str = "") -> N
     df_data = df.copy()
     df = df.loc[:, ~df.eq("–").all()]
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df.head(top),
-                headers=df.columns,
-                floatfmt=".2f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df.head(top),
+        headers=list(df.columns),
+        show_index=False,
+        title="Top DeFi Lendings",
+    )
+    console.print("")
 
     export_data(
         export,
@@ -89,6 +82,7 @@ def display_lending_rates(top: int, current: bool = True, export: str = "") -> N
     )
 
 
+@log_start_end(log=logger)
 def display_borrow_rates(top: int, current: bool = True, export: str = "") -> None:
     """Displays DeFi borrow rates. By using smart contracts, borrowers are able to lock
     collateral to protect against defaults while seamlessly adding to or closing their
@@ -109,19 +103,13 @@ def display_borrow_rates(top: int, current: bool = True, export: str = "") -> No
     df_data = df.copy()
     df = df.loc[:, ~df.eq("–").all()]
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df.head(top),
-                headers=df.columns,
-                floatfmt=".2f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df.head(top),
+        headers=list(df.columns),
+        show_index=False,
+        title="DeFi Borrow Rates",
+    )
+    console.print("")
 
     export_data(
         export,

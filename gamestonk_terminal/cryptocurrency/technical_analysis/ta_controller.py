@@ -5,21 +5,18 @@ __docformat__ = "numpy"
 import argparse
 from typing import List
 from datetime import datetime
-from colorama import Style
 
 import pandas as pd
-import matplotlib.pyplot as plt
 from prompt_toolkit.completion import NestedCompleter
-
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import CryptoBaseController
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
+    EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     parse_known_args_and_warn,
     check_positive_list,
     check_positive,
     valid_date,
-    try_except,
-    system_clear,
 )
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.common.technical_analysis import (
@@ -32,12 +29,11 @@ from gamestonk_terminal.common.technical_analysis import (
 )
 
 
-class TechnicalAnalysisController:
+class TechnicalAnalysisController(CryptoBaseController):
     """Technical Analysis Controller class"""
 
-    # Command choices
-    CHOICES = ["cls", "?", "help", "q", "quit"]
     CHOICES_COMMANDS = [
+        "load",
         "ema",
         "sma",
         "vwap",
@@ -57,119 +53,73 @@ class TechnicalAnalysisController:
         "fib",
     ]
 
-    CHOICES += CHOICES_COMMANDS
+    PATH = "/crypto/ta/"
 
     def __init__(
         self,
-        ticker: str,
+        coin: str,
         start: datetime,
         interval: str,
         stock: pd.DataFrame,
+        queue: List[str] = None,
     ):
         """Constructor"""
-        self.ticker = ticker
+        super().__init__(queue)
+
+        self.coin = coin
         self.start = start
         self.interval = interval
         self.stock = stock
         self.stock["Adj Close"] = stock["Close"]
 
-        self.ta_parser = argparse.ArgumentParser(add_help=False, prog="ta")
-        self.ta_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
-        )
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
         """Print help"""
-        s_intraday = (f"Intraday {self.interval}", "Daily")[self.interval == "1440min"]
-        if self.start:
-            stock_str = f"\n{s_intraday} Crypto: {self.ticker} (from {self.start.strftime('%Y-%m-%d')})"
-        else:
-            stock_str = f"\n{s_intraday} Crypto: {self.ticker}"
+        crypto_str = f" {self.coin} (from {self.start.strftime('%Y-%m-%d')})"
+        help_text = f"""[cmds]
+[param]Coin Loaded: [/param]{crypto_str}
 
-        dim = Style.DIM if "Volume" not in self.stock else ""
-        not_dim = Style.RESET_ALL if "Volume" not in self.stock else ""
-        help_str = f"""
-{stock_str}
-
-Technical Analysis:
-    cls         clear screen
-    help        show this menu again
-    q           quit this menu, and shows back to main menu
-    quit        quit to abandon program
-
-Overlap:
+[info]Overlap:[/info]
     ema         exponential moving average
     sma         simple moving average
-    zlma        zero lag moving average{dim}
-    vwap        volume weighted average price{not_dim}
-Momentum:
+    wma         weighted moving average
+    hma         hull moving average
+    zlma        zero lag moving average
+    vwap        volume weighted average price
+[info]Momentum:[/info]
     cci         commodity channel index
     macd        moving average convergence/divergence
     rsi         relative strength index
     stoch       stochastic oscillator
     fisher      fisher transform
     cg          centre of gravity
-Trend:
+[info]Trend:[/info]
     adx         average directional movement index
     aroon       aroon indicator
-Volatility:
+[info]Volatility:[/info]
     bbands      bollinger bands
-    donchian    donchian channels{dim}
-Volume:
-    ad          accumulation/distribution line values
-    obv         on balance volume{not_dim}
-Custom:
-    fib         fibonacci retracement
+    donchian    donchian channels
+    kc          keltner channels
+[info]Volume:[/info]
+    ad          accumulation/distribution line
+    adosc       chaikin oscillator
+    obv         on balance volume
+[info]Custom:[/info]
+    fib         fibonacci retracement[/cmds]
 """
-        print(help_str)
+        console.print(text=help_text, menu="Cryptocurrency - Technical Analysis")
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
-
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self.ta_parser.parse_known_args(an_input.split())
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
-
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
+    def custom_reset(self):
+        """Class specific component of reset command"""
+        if self.coin:
+            return ["crypto", f"load {self.coin}", "ta"]
+        return []
 
     # TODO: Go through all models and make sure all needed columns are in dfs
-    @try_except
+
     def call_ema(self, other_args: List[str]):
         """Process ema command"""
         parser = argparse.ArgumentParser(
@@ -208,34 +158,22 @@ Custom:
             help="offset",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            overlap_view.view_ma(
+                ma_type="EMA",
+                s_ticker=self.coin,
+                series=self.stock["Close"],
+                length=ns_parser.n_length,
+                offset=ns_parser.n_offset,
+                export=ns_parser.export,
+            )
 
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-l")
-
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        overlap_view.view_ma(
-            ma_type="EMA",
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            offset=ns_parser.n_offset,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_sma(self, other_args: List[str]):
         """Process sma command"""
         parser = argparse.ArgumentParser(
@@ -273,33 +211,21 @@ Custom:
             help="offset",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            overlap_view.view_ma(
+                ma_type="SMA",
+                s_ticker=self.coin,
+                series=self.stock["Close"],
+                length=ns_parser.n_length,
+                offset=ns_parser.n_offset,
+                export=ns_parser.export,
+            )
 
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-l")
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        overlap_view.view_ma(
-            ma_type="SMA",
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            offset=ns_parser.n_offset,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_zlma(self, other_args: List[str]):
         """Process zlma command"""
         parser = argparse.ArgumentParser(
@@ -337,34 +263,22 @@ Custom:
             help="offset",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            overlap_view.view_ma(
+                ma_type="ZLMA",
+                s_ticker=self.coin,
+                series=self.stock["Close"],
+                length=ns_parser.n_length,
+                offset=ns_parser.n_offset,
+                export=ns_parser.export,
+            )
 
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-l")
-
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        overlap_view.view_ma(
-            ma_type="ZLMA",
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            offset=ns_parser.n_offset,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_vwap(self, other_args: List[str]):
         """Process vwap command"""
         parser = argparse.ArgumentParser(
@@ -387,32 +301,21 @@ Custom:
             help="offset",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            if self.interval == "1440min":
+                console.print("VWAP should be used with intraday data.\n")
 
-        # Daily
-        if self.interval == "1440min":
-            print("VWAP should be used with intraday data. \n")
-            return
+            overlap_view.view_vwap(
+                s_ticker=self.coin,
+                s_interval=self.interval,
+                ohlc=self.stock,
+                offset=ns_parser.n_offset,
+                export=ns_parser.export,
+            )
 
-        overlap_view.view_vwap(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            offset=ns_parser.n_offset,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_cci(self, other_args: List[str]):
         """Process cci command"""
 
@@ -438,7 +341,6 @@ Custom:
             default=14,
             help="length",
         )
-
         parser.add_argument(
             "-s",
             "--scalar",
@@ -449,29 +351,18 @@ Custom:
             help="scalar",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_cci(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                length=ns_parser.n_length,
+                scalar=ns_parser.n_scalar,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        momentum_view.plot_cci(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            scalar=ns_parser.n_scalar,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_macd(self, other_args: List[str]):
         """Process macd command"""
         parser = argparse.ArgumentParser(
@@ -490,7 +381,6 @@ Custom:
                 should be above zero for a buy, and below zero for a sell.
             """,
         )
-
         parser.add_argument(
             "-f",
             "--fast",
@@ -500,7 +390,6 @@ Custom:
             default=12,
             help="The short period.",
         )
-
         parser.add_argument(
             "-s",
             "--slow",
@@ -510,7 +399,6 @@ Custom:
             default=26,
             help="The long period.",
         )
-
         parser.add_argument(
             "--signal",
             action="store",
@@ -520,30 +408,19 @@ Custom:
             help="The signal period.",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_macd(
+                s_ticker=self.coin,
+                series=self.stock["Adj Close"],
+                n_fast=ns_parser.n_fast,
+                n_slow=ns_parser.n_slow,
+                n_signal=ns_parser.n_signal,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        momentum_view.view_macd(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            n_fast=ns_parser.n_fast,
-            n_slow=ns_parser.n_slow,
-            n_signal=ns_parser.n_signal,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_rsi(self, other_args: List[str]):
         """Process rsi command"""
         parser = argparse.ArgumentParser(
@@ -568,7 +445,6 @@ Custom:
             default=14,
             help="length",
         )
-
         parser.add_argument(
             "-s",
             "--scalar",
@@ -578,7 +454,6 @@ Custom:
             default=100,
             help="scalar",
         )
-
         parser.add_argument(
             "-d",
             "--drift",
@@ -589,30 +464,22 @@ Custom:
             help="drift",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_rsi(
+                s_ticker=self.coin,
+                series=self.stock["Adj Close"],
+                length=ns_parser.n_length,
+                scalar=ns_parser.n_scalar,
+                drift=ns_parser.n_drift,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        momentum_view.view_rsi(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            scalar=ns_parser.n_scalar,
-            drift=ns_parser.n_drift,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_stoch(self, other_args: List[str]):
         """Process stoch command"""
         parser = argparse.ArgumentParser(
@@ -628,7 +495,6 @@ Custom:
                 for crossover signals.
             """,
         )
-
         parser.add_argument(
             "-k",
             "--fastkperiod",
@@ -638,7 +504,6 @@ Custom:
             default=14,
             help="The time period of the fastk moving average",
         )
-
         parser.add_argument(
             "-d",
             "--slowdperiod",
@@ -648,7 +513,6 @@ Custom:
             default=3,
             help="The time period of the slowd moving average",
         )
-
         parser.add_argument(
             "--slowkperiod",
             action="store",
@@ -658,29 +522,19 @@ Custom:
             help="The time period of the slowk moving average",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_stoch(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                fastkperiod=ns_parser.n_fastkperiod,
+                slowdperiod=ns_parser.n_slowdperiod,
+                slowkperiod=ns_parser.n_slowkperiod,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        momentum_view.view_stoch(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            fastkperiod=ns_parser.n_fastkperiod,
-            slowdperiod=ns_parser.n_slowdperiod,
-            slowkperiod=ns_parser.n_slowkperiod,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_fisher(self, other_args: List[str]):
         """Process fisher command"""
         parser = argparse.ArgumentParser(
@@ -695,7 +549,6 @@ Custom:
                 helps show the trend and isolate the price waves within a trend.
             """,
         )
-
         parser.add_argument(
             "-l",
             "--length",
@@ -706,28 +559,20 @@ Custom:
             help="length",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_fisher(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                length=ns_parser.n_length,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        momentum_view.view_fisher(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_cg(self, other_args: List[str]):
         """Process cg command"""
         parser = argparse.ArgumentParser(
@@ -742,7 +587,6 @@ Custom:
                 price change of the asset.
             """,
         )
-
         parser.add_argument(
             "-l",
             "--length",
@@ -753,27 +597,20 @@ Custom:
             help="length",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
-        )
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-l")
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        momentum_view.view_cg(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            export=ns_parser.export,
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            momentum_view.display_cg(
+                s_ticker=self.coin,
+                series=self.stock["Adj Close"],
+                length=ns_parser.n_length,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_adx(self, other_args: List[str]):
         """Process adx command"""
         parser = argparse.ArgumentParser(
@@ -817,30 +654,19 @@ Custom:
             help="drift",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            trend_indicators_view.display_adx(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                length=ns_parser.n_length,
+                scalar=ns_parser.n_scalar,
+                drift=ns_parser.n_drift,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        trend_indicators_view.plot_adx(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            scalar=ns_parser.n_scalar,
-            drift=ns_parser.n_drift,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_aroon(self, other_args: List[str]):
         """Process aroon command"""
         parser = argparse.ArgumentParser(
@@ -891,29 +717,18 @@ Custom:
             help="offset",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            trend_indicators_view.display_aroon(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                length=ns_parser.n_length,
+                scalar=ns_parser.n_scalar,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        trend_indicators_view.plot_aroon(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            scalar=ns_parser.n_scalar,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_bbands(self, other_args: List[str]):
         """Process bbands command"""
         parser = argparse.ArgumentParser(
@@ -963,29 +778,19 @@ Custom:
             help="mamode",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            volatility_view.display_bbands(
+                ticker=self.coin,
+                ohlc=self.stock,
+                length=ns_parser.n_length,
+                n_std=ns_parser.n_std,
+                mamode=ns_parser.s_mamode,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        volatility_view.view_bbands(
-            ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            length=ns_parser.n_length,
-            n_std=ns_parser.n_std,
-            mamode=ns_parser.s_mamode,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_donchian(self, other_args: List[str]):
         """Process donchian command"""
         parser = argparse.ArgumentParser(
@@ -1022,28 +827,18 @@ Custom:
             help="length",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            volatility_view.display_donchian(
+                ticker=self.coin,
+                ohlc=self.stock,
+                upper_length=ns_parser.n_length_upper,
+                lower_length=ns_parser.n_length_lower,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        volatility_view.view_donchian(
-            ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            upper_length=ns_parser.n_length_upper,
-            lower_length=ns_parser.n_length_lower,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_ad(self, other_args: List[str]):
         """Process ad command"""
         parser = argparse.ArgumentParser(
@@ -1072,28 +867,17 @@ Custom:
             help="uses open value of stock",
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            volume_view.display_ad(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                use_open=ns_parser.b_use_open,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        volume_view.plot_ad(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            use_open=ns_parser.b_use_open,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_obv(self, other_args: List[str]):
         """Process obv command"""
         parser = argparse.ArgumentParser(
@@ -1111,27 +895,16 @@ Custom:
             """,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
+        if ns_parser:
+            volume_view.display_obv(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                export=ns_parser.export,
+            )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        volume_view.plot_obv(
-            s_ticker=self.ticker,
-            s_interval=self.interval,
-            df_stock=self.stock,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_fib(self, other_args: List[str]):
         """Process fib command"""
         parser = argparse.ArgumentParser(
@@ -1166,56 +939,15 @@ Custom:
             required="--start" in other_args,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        custom_indicators_view.fibonacci_retracement(
-            s_ticker=self.ticker,
-            df_stock=self.stock,
-            period=ns_parser.period,
-            start_date=ns_parser.start,
-            end_date=ns_parser.end,
-            export=ns_parser.export,
-        )
-
-
-def menu(ticker: str, start: datetime, interval: str, stock: pd.DataFrame):
-    """Technical Analysis Menu"""
-
-    ta_controller = TechnicalAnalysisController(ticker, start, interval, stock)
-    ta_controller.call_help(None)
-
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in ta_controller.CHOICES}
+        if ns_parser:
+            custom_indicators_view.fibonacci_retracement(
+                s_ticker=self.coin,
+                ohlc=self.stock,
+                period=ns_parser.period,
+                start_date=ns_parser.start,
+                end_date=ns_parser.end,
+                export=ns_parser.export,
             )
-            an_input = session.prompt(
-                f"{get_flair()} (crypto)>(ta)> ",
-                completer=completer,
-            )
-        else:
-            an_input = input(f"{get_flair()} (crypto)>(ta)> ")
-
-        try:
-            plt.close("all")
-
-            process_input = ta_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue

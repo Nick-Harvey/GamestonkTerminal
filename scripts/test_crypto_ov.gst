@@ -1,0 +1,14 @@
+crypto
+ov
+cbpairs
+cgexchanges
+cghold
+cgglobal
+cgcategories
+cpglobal
+altindex
+btcrb
+wf
+ch
+news
+exit

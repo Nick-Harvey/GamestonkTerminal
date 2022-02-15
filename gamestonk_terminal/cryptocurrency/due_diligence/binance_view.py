@@ -1,20 +1,32 @@
 """Binance view"""
 __docformat__ = "numpy"
 
+import logging
 import os
-from binance.client import Client
-from tabulate import tabulate
+from typing import List, Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from gamestonk_terminal.helper_funcs import (
-    export_data,
-)
-from gamestonk_terminal.cryptocurrency.cryptocurrency_helpers import plot_order_book
+from binance.client import Client
+
 import gamestonk_terminal.config_terminal as cfg
-from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.cryptocurrency.cryptocurrency_helpers import plot_order_book
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
-def display_order_book(coin: str, limit: int, currency: str, export: str) -> None:
+@log_start_end(log=logger)
+def display_order_book(
+    coin: str,
+    limit: int,
+    currency: str,
+    export: str,
+    external_axes: Optional[List[plt.Axes]] = None,
+) -> None:
     """Get order book for currency. [Source: Binance]
 
     Parameters
@@ -28,6 +40,8 @@ def display_order_book(coin: str, limit: int, currency: str, export: str) -> Non
         Quote currency (what to view coin vs)
     export: str
         Export dataframe data to csv,json,xlsx
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
     """
 
     pair = coin + currency
@@ -38,7 +52,7 @@ def display_order_book(coin: str, limit: int, currency: str, export: str) -> Non
     asks = np.asarray(market_book["asks"], dtype=float)
     bids = np.insert(bids, 2, bids[:, 1].cumsum(), axis=1)
     asks = np.insert(asks, 2, np.flipud(asks[:, 1]).cumsum(), axis=1)
-    plot_order_book(bids, asks, coin)
+    plot_order_book(bids, asks, coin, external_axes)
 
     export_data(
         export,
@@ -48,6 +62,7 @@ def display_order_book(coin: str, limit: int, currency: str, export: str) -> Non
     )
 
 
+@log_start_end(log=logger)
 def display_balance(coin: str, currency: str, export: str) -> None:
     """Get account holdings for asset. [Source: Binance]
 
@@ -66,25 +81,22 @@ def display_balance(coin: str, currency: str, export: str) -> None:
     pair = coin + currency
     current_balance = client.get_asset_balance(asset=pair)
     if current_balance is None:
-        print("Check loaded coin")
+        console.print("Check loaded coin")
         return
 
-    print("")
+    console.print("")
     amounts = [float(current_balance["free"]), float(current_balance["locked"])]
     total = np.sum(amounts)
     df = pd.DataFrame(amounts).apply(lambda x: str(float(x)))
     df.columns = ["Amount"]
     df.index = ["Free", "Locked"]
     df["Percent"] = df.div(df.sum(axis=0), axis=1).round(3)
-    print(f"You currently have {total} coins and the breakdown is:")
+    console.print(f"You currently have {total} coins and the breakdown is:")
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(df, headers=df.columns, showindex=True, tablefmt="fancy_grid"),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df, headers=df.columns, show_index=True, title="Account Holdings for Assets"
+    )
+    console.print("")
 
     export_data(
         export,

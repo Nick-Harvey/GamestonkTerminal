@@ -2,15 +2,36 @@
 __docformat__ = "numpy"
 
 import configparser
+import logging
 from typing import Tuple
 
 import pandas as pd
 import requests
 import yfinance as yf
 
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.options import yfinance_model
 
+logger = logging.getLogger(__name__)
 
+accepted_orders = [
+    "e_desc",
+    "e_asc",
+    "iv_desc",
+    "iv_asc",
+    "md_desc",
+    "md_asc",
+    "lp_desc",
+    "lp_asc",
+    "oi_asc",
+    "oi_desc",
+    "v_desc",
+    "v_asc",
+]
+
+
+@log_start_end(log=logger)
 def get_historical_greeks(
     ticker: str, expiry: str, chain_id: str, strike: float, put: bool
 ) -> pd.DataFrame:
@@ -47,7 +68,7 @@ def get_historical_greeks(
     r = requests.get(f"https://api.syncretism.io/ops/historical/{chain_id}")
 
     if r.status_code != 200:
-        print("Error in request.")
+        console.print("Error in request.")
         return pd.DataFrame()
 
     history = r.json()
@@ -90,6 +111,7 @@ def get_historical_greeks(
     return df
 
 
+@log_start_end(log=logger)
 def get_screener_output(preset: str, presets_path: str) -> Tuple[pd.DataFrame, str]:
     """Screen options based on preset filters
 
@@ -136,8 +158,15 @@ def get_screener_output(preset: str, presets_path: str) -> Tuple[pd.DataFrame, s
 
     d_filters = {k: v for k, v in dict(preset_filter["FILTER"]).items() if v}
     s_filters = str(d_filters)
-    s_filters = s_filters.replace(": '", ": ").replace("',", ",").replace("'}", "}")
-    s_filters = s_filters.replace("'", '"')
+    s_filters = (
+        s_filters.replace(": '", ": ")
+        .replace("',", ",")
+        .replace("'}", "}")
+        .replace("'", '"')
+    )
+    for order in accepted_orders:
+        s_filters = s_filters.replace(f" {order}", f' "{order}"')
+
     errors = check_presets(d_filters)
 
     if errors:
@@ -174,6 +203,7 @@ def get_screener_output(preset: str, presets_path: str) -> Tuple[pd.DataFrame, s
 # pylint: disable=eval-used
 
 
+@log_start_end(log=logger)
 def check_presets(preset_dict: dict) -> str:
     """Checks option screener preset values
 
@@ -285,17 +315,7 @@ def check_presets(preset_dict: dict) -> str:
                 error += f"{key} : {value} , should be integer\n"
 
         elif key == "order-by":
-            accepted_orders = [
-                "e_desc",
-                "e_asc",
-                "iv_desc",
-                "iv_asc",
-                "md_desc",
-                "md_asc",
-                "lp_desc",
-                "lp_asc",
-            ]
-            if value not in accepted_orders:
+            if value.replace('"', "") not in accepted_orders:
                 error += f"{key} : {value} not accepted ordering\n"
 
     return error

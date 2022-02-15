@@ -1,17 +1,24 @@
 """Alpha Vantage Model"""
 __docformat__ = "numpy"
 
-from typing import Dict, Tuple
+import logging
+from typing import Dict, List, Tuple
 
-import requests
-
-from alpha_vantage.fundamentaldata import FundamentalData
+import numpy as np
 import pandas as pd
-from gamestonk_terminal.stocks.fundamental_analysis.fa_helper import clean_df_index
-from gamestonk_terminal.helper_funcs import long_number_format
+import requests
+from alpha_vantage.fundamentaldata import FundamentalData
+
 from gamestonk_terminal import config_terminal as cfg
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import long_number_format
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.stocks.fundamental_analysis.fa_helper import clean_df_index
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_overview(ticker: str) -> pd.DataFrame:
     """Get alpha vantage company overview
 
@@ -32,7 +39,12 @@ def get_overview(ticker: str) -> pd.DataFrame:
     # If the returned data was successful
     if result.status_code == 200:
         # Parse json data to dataframe
+        if "Note" in result.json():
+            console.print(result.json()["Note"], "\n")
+            return pd.DataFrame()
+
         df_fa = pd.json_normalize(result.json())
+
         # Keep json data sorting in dataframe
         df_fa = df_fa[list(result.json().keys())].T
         df_fa.iloc[5:] = df_fa.iloc[5:].applymap(lambda x: long_number_format(x))
@@ -63,6 +75,7 @@ def get_overview(ticker: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def get_key_metrics(ticker: str) -> pd.DataFrame:
     """Get key metrics from overview
 
@@ -115,6 +128,7 @@ def get_key_metrics(ticker: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def get_income_statements(
     ticker: str, number: int, quarterly: bool = False
 ) -> pd.DataFrame:
@@ -136,20 +150,27 @@ def get_income_statements(
     """
     url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={ticker}&apikey={cfg.API_KEY_ALPHAVANTAGE}"
     r = requests.get(url)
-    statements = r.json()
-    if quarterly:
-        # pylint: disable=unbalanced-tuple-unpacking
-        df_fa = pd.DataFrame(statements["quarterlyReports"])
-    else:
-        # pylint: disable=unbalanced-tuple-unpacking
-        df_fa = pd.DataFrame(statements["annualReports"])
+    if r.status_code == 200:
+        statements = r.json()
+        df_fa = pd.DataFrame()
+        if quarterly:
+            if "quarterlyReports" in statements:
+                df_fa = pd.DataFrame(statements["quarterlyReports"])
+        else:
+            if "annualReports" in statements:
+                df_fa = pd.DataFrame(statements["annualReports"])
 
-    df_fa = df_fa.set_index("fiscalDateEnding")
-    df_fa = df_fa.head(number)
-    df_fa = df_fa.applymap(lambda x: long_number_format(x))
-    return df_fa[::-1].T
+        if df_fa.empty:
+            return pd.DataFrame()
+
+        df_fa = df_fa.set_index("fiscalDateEnding")
+        df_fa = df_fa.head(number)
+        df_fa = df_fa.applymap(lambda x: long_number_format(x))
+        return df_fa[::-1].T
+    return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def get_balance_sheet(
     ticker: str, number: int, quarterly: bool = False
 ) -> pd.DataFrame:
@@ -171,18 +192,27 @@ def get_balance_sheet(
     """
     url = f"https://www.alphavantage.co/query?function=BALANCE_SHEET&symbol={ticker}&apikey={cfg.API_KEY_ALPHAVANTAGE}"
     r = requests.get(url)
-    statements = r.json()
-    if quarterly:
-        df_fa = pd.DataFrame(statements["quarterlyReports"])
-    else:
-        df_fa = pd.DataFrame(statements["annualReports"])
+    if r.status_code == 200:
+        statements = r.json()
+        df_fa = pd.DataFrame()
+        if quarterly:
+            if "quarterlyReports" in statements:
+                df_fa = pd.DataFrame(statements["quarterlyReports"])
+        else:
+            if "annualReports" in statements:
+                df_fa = pd.DataFrame(statements["annualReports"])
 
-    df_fa = df_fa.set_index("fiscalDateEnding")
-    df_fa = df_fa.head(number)
-    df_fa = df_fa.applymap(lambda x: long_number_format(x))
-    return df_fa[::-1].T
+        if df_fa.empty:
+            return pd.DataFrame()
+
+        df_fa = df_fa.set_index("fiscalDateEnding")
+        df_fa = df_fa.head(number)
+        df_fa = df_fa.applymap(lambda x: long_number_format(x))
+        return df_fa[::-1].T
+    return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def get_cash_flow(ticker: str, number: int, quarterly: bool = False) -> pd.DataFrame:
     """Get cash flows for company
 
@@ -202,18 +232,27 @@ def get_cash_flow(ticker: str, number: int, quarterly: bool = False) -> pd.DataF
     """
     url = f"https://www.alphavantage.co/query?function=CASH_FLOW&symbol={ticker}&apikey={cfg.API_KEY_ALPHAVANTAGE}"
     r = requests.get(url)
-    statements = r.json()
-    if quarterly:
-        df_fa = pd.DataFrame(statements["quarterlyReports"])
-    else:
-        df_fa = pd.DataFrame(statements["annualReports"])
+    if r.status_code == 200:
+        statements = r.json()
+        df_fa = pd.DataFrame()
+        if quarterly:
+            if "quarterlyReports" in statements:
+                df_fa = pd.DataFrame(statements["quarterlyReports"])
+        else:
+            if "annualReports" in statements:
+                df_fa = pd.DataFrame(statements["annualReports"])
 
-    df_fa = df_fa.set_index("fiscalDateEnding")
-    df_fa = df_fa.head(number)
-    df_fa = df_fa.applymap(lambda x: long_number_format(x))
-    return df_fa[::-1].T
+        if df_fa.empty:
+            return pd.DataFrame()
+
+        df_fa = df_fa.set_index("fiscalDateEnding")
+        df_fa = df_fa.head(number)
+        df_fa = df_fa.applymap(lambda x: long_number_format(x))
+        return df_fa[::-1].T
+    return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def get_earnings(ticker: str, quarterly: bool = False) -> pd.DataFrame:
     """Get earnings calendar for ticker
 
@@ -273,7 +312,29 @@ def get_earnings(ticker: str, quarterly: bool = False) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def get_fraud_ratios(ticker: str) -> Tuple[Dict[str, float], float]:
+@log_start_end(log=logger)
+def df_values(df: pd.DataFrame, item: str) -> List[int]:
+    """Clean the values from the df
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The Dataframe to use
+    item : str
+        The item to select
+
+    Returns
+    -------
+    values : List[int]
+        The values for the dataframe
+    """
+    selection = df[item]
+    values = selection.apply(lambda x: int(x) if x else 0).values
+    return values.tolist()
+
+
+@log_start_end(log=logger)
+def get_fraud_ratios(ticker: str) -> Tuple[Dict[str, float], float, float]:
     """Get fraud ratios based on fundamentals
 
     Parameters
@@ -298,42 +359,23 @@ def get_fraud_ratios(ticker: str) -> Tuple[Dict[str, float], float]:
     df_bs = df_bs.set_index("fiscalDateEnding").iloc[:2]
     df_is = df_is.set_index("fiscalDateEnding").iloc[:2]
 
-    ar = df_bs["currentNetReceivables"].apply(lambda x: 0 if x else int(x)).values
-    sales = df_is["totalRevenue"].apply(lambda x: 0 if x else int(x)).values
-    cogs = (
-        df_is["costofGoodsAndServicesSold"].apply(lambda x: 0 if x else int(x)).values
-    )
-    ni = df_is["netIncome"].apply(lambda x: 0 if x else int(x)).values
-    ca = df_bs["totalCurrentAssets"].apply(lambda x: 0 if x else int(x)).values
-    cl = df_bs["totalCurrentLiabilities"].apply(lambda x: 0 if x else int(x)).values
-    ppe = df_bs["propertyPlantEquipment"].apply(lambda x: 0 if x else int(x)).values
-    cash = (
-        df_bs["cashAndCashEquivalentsAtCarryingValue"]
-        .apply(lambda x: 0 if x else int(x))
-        .values
-    )
-    cash_and_sec = (
-        df_bs["cashAndShortTermInvestments"].apply(lambda x: 0 if x else int(x)).values
-    )
+    ar = df_values(df_bs, "currentNetReceivables")
+    sales = df_values(df_is, "totalRevenue")
+    cogs = df_values(df_is, "costofGoodsAndServicesSold")
+    ni = df_values(df_is, "netIncome")
+    ca = df_values(df_bs, "totalCurrentAssets")
+    cl = df_values(df_bs, "totalCurrentLiabilities")
+    ppe = df_values(df_bs, "propertyPlantEquipment")
+    cash = df_values(df_bs, "cashAndCashEquivalentsAtCarryingValue")
+    cash_and_sec = df_values(df_bs, "cashAndShortTermInvestments")
     sec = [y - x for (x, y) in zip(cash, cash_and_sec)]
-    ta = df_bs["totalAssets"].apply(lambda x: 0 if x else int(x)).values
-    dep = (
-        df_bs["accumulatedDepreciationAmortizationPPE"]
-        .apply(lambda x: 0 if x else int(x))
-        .values
-    )
-    sga = (
-        df_is["sellingGeneralAndAdministrative"]
-        .apply(lambda x: 0 if x else int(x))
-        .values
-    )
-    tl = df_bs["totalLiabilities"].apply(lambda x: 0 if x else int(x)).values
-    icfo = (
-        df_is["netIncomeFromContinuingOperations"]
-        .apply(lambda x: 0 if x else int(x))
-        .values
-    )
-    cfo = df_cf["operatingCashflow"].apply(lambda x: 0 if x else int(x)).values
+    ta = df_values(df_bs, "totalAssets")
+    dep = df_values(df_bs, "accumulatedDepreciationAmortizationPPE")
+    sga = df_values(df_is, "sellingGeneralAndAdministrative")
+    tl = df_values(df_bs, "totalLiabilities")
+    icfo = df_values(df_is, "netIncomeFromContinuingOperations")
+    cfo = df_values(df_cf, "operatingCashflow")
+
     ratios: Dict = {}
     ratios["DSRI"] = (ar[0] / sales[0]) / (ar[1] / sales[1])
     ratios["GMI"] = ((sales[1] - cogs[1]) / sales[1]) / (
@@ -364,5 +406,13 @@ def get_fraud_ratios(ticker: str) -> Tuple[Dict[str, float], float]:
         + (5.679 * (tl[0] / ta[0]))
         + (0.004 * (ca[0] / cl[0]))
     )
+    v1 = np.log(ta[0] / 1000)
+    v2 = ni[0] / ta[0]
+    v3 = cash[0] / cl[0]
 
-    return ratios, zscore
+    x = ((v1 + 0.85) * v2) - 0.85
+    y = 1 + v3
+
+    mckee = x**2 / (x**2 + y**2)
+
+    return ratios, zscore, mckee

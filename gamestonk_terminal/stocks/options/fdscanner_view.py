@@ -1,16 +1,20 @@
 """Fdscanner view"""
 __docformat__ = "numpy"
 
+import logging
 import os
 
 import pandas as pd
-from tabulate import tabulate
 
-from gamestonk_terminal.helper_funcs import export_data
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.options import fdscanner_model
-from gamestonk_terminal import feature_flags as gtff
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_options(
     num: int,
     sort_column: pd.Timestamp,
@@ -42,20 +46,13 @@ def display_options(
         data = data[data.Type == "Put"]
     if calls_only:
         data = data[data.Type == "Call"]
-    print(f"Last Updated: {last_update} (EST)")
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                data[:num],
-                headers=data.columns,
-                tablefmt="fancy_grid",
-                showindex=False,
-                floatfmt=["", "", ".1f", "", ".1f", ".0f", ".0f", ".2f", ".2f"],
-            )
-        )
-    else:
-        print(data[:num].to_string())
-    print("")
+    print_rich_table(
+        data[:num],
+        headers=list(data.columns),
+        show_index=False,
+        title=f"Last Updated: {last_update} (EST)",
+    )
+    console.print("")
 
     if export:
         export_data(

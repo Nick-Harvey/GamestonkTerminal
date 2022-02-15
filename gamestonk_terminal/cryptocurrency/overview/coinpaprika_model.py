@@ -1,13 +1,74 @@
 """CoinPaprika model"""
 __docformat__ = "numpy"
 
-from datetime import datetime
+import logging
 import textwrap
+from datetime import datetime
+
 import pandas as pd
 from dateutil import parser
+
 from gamestonk_terminal.cryptocurrency.coinpaprika_helpers import PaprikaSession
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
+
+MARKETS_FILTERS = [
+    "rank",
+    "name",
+    "symbol",
+    "price",
+    "volume_24h",
+    "mcap_change_24h",
+    "pct_change_1h",
+    "pct_change_24h",
+    "ath_price",
+    "pct_from_ath",
+]
+
+EXMARKETS_FILTERS = [
+    "pair",
+    "base_currency_name",
+    "quote_currency_name",
+    "category",
+    "reported_volume_24h_share",
+    "trust_score",
+    "market_url",
+]
+
+INFO_FILTERS = [
+    "rank",
+    "name",
+    "symbol",
+    "price",
+    "volume_24h",
+    "circulating_supply",
+    "total_supply",
+    "max_supply",
+    "ath_price",
+    "market_cap",
+    "beta_value",
+]
+
+EXCHANGES_FILTERS = [
+    "rank",
+    "name",
+    "currencies",
+    "markets",
+    "fiats",
+    "confidence",
+    "volume_24h",
+    "volume_7d",
+    "volume_30d",
+    "sessions_per_month",
+]
 
 
+CONTRACTS_FILTERS = ["id", "type", "active"]
+
+
+@log_start_end(log=logger)
 def get_global_market() -> pd.DataFrame:
     """Return data frame with most important global crypto statistics like:
     market_cap_usd, volume_24h_usd, bitcoin_dominance_percentage, cryptocurrencies_number,
@@ -32,12 +93,13 @@ def get_global_market() -> pd.DataFrame:
             try:
                 global_markets[key] = parser.parse(date).strftime("%Y-%m-%d %H:%M:%S")
             except (KeyError, ValueError, TypeError) as e:
-                print(e)
+                console.print(e)
     df = pd.Series(global_markets).to_frame().reset_index()
     df.columns = ["Metric", "Value"]
     return df
 
 
+@log_start_end(log=logger)
 def get_list_of_coins() -> pd.DataFrame:
     """Get list of all available coins on CoinPaprika  [Source: CoinPaprika]
 
@@ -55,6 +117,7 @@ def get_list_of_coins() -> pd.DataFrame:
     return df[["rank", "id", "name", "symbol", "type"]]
 
 
+@log_start_end(log=logger)
 def _get_coins_info_helper(quotes: str = "USD") -> pd.DataFrame:
     """Helper method that call /tickers endpoint which returns for all coins quoted in provided currency/crypto
 
@@ -118,7 +181,7 @@ def _get_coins_info_helper(quotes: str = "USD") -> pd.DataFrame:
         ]
         data.columns = [col.replace("percent", "pct") for col in list(data.columns)]
     except KeyError as e:
-        print(e)
+        console.print(e)
     data.rename(
         columns={
             "market_cap_change_24h": "mcap_change_24h",
@@ -129,6 +192,7 @@ def _get_coins_info_helper(quotes: str = "USD") -> pd.DataFrame:
     return data
 
 
+@log_start_end(log=logger)
 def get_coins_info(quotes: str = "USD") -> pd.DataFrame:  # > format big numbers fix
     """Returns basic coin information for all coins from CoinPaprika API [Source: CoinPaprika]
 
@@ -160,6 +224,7 @@ def get_coins_info(quotes: str = "USD") -> pd.DataFrame:  # > format big numbers
     return _get_coins_info_helper(quotes)[cols].sort_values(by="rank")
 
 
+@log_start_end(log=logger)
 def get_coins_market_info(quotes: str = "USD") -> pd.DataFrame:
     """Returns basic coin information for all coins from CoinPaprika API [Source: CoinPaprika]
 
@@ -190,6 +255,7 @@ def get_coins_market_info(quotes: str = "USD") -> pd.DataFrame:
     return _get_coins_info_helper(quotes=quotes)[cols].sort_values(by="rank")
 
 
+@log_start_end(log=logger)
 def get_list_of_exchanges(quotes: str = "USD") -> pd.DataFrame:
     """
     List exchanges from CoinPaprika API [Source: CoinPaprika]
@@ -214,7 +280,7 @@ def get_list_of_exchanges(quotes: str = "USD") -> pd.DataFrame:
             col.replace(f"quotes.{quotes}.", "") for col in df.columns.tolist()
         ]
     except KeyError as e:
-        print(e)
+        console.print(e)
     df = df[df["active"]]
     cols = [
         "adjusted_rank",
@@ -242,6 +308,7 @@ def get_list_of_exchanges(quotes: str = "USD") -> pd.DataFrame:
     return df.sort_values(by="rank")
 
 
+@log_start_end(log=logger)
 def get_exchanges_market(
     exchange_id: str = "binance", quotes: str = "USD"
 ) -> pd.DataFrame:
@@ -266,7 +333,7 @@ def get_exchanges_market(
         session.ENDPOINTS["exchange_markets"].format(exchange_id), quotes=quotes
     )
     if "error" in data:
-        print(data)
+        console.print(data)
         return pd.DataFrame()
     cols = [
         "exchange_id",
@@ -283,6 +350,7 @@ def get_exchanges_market(
     return df[cols]
 
 
+@log_start_end(log=logger)
 def get_all_contract_platforms() -> pd.DataFrame:
     """List all smart contract platforms like ethereum, solana, cosmos, polkadot, kusama ... [Source: CoinPaprika]
 
@@ -303,6 +371,7 @@ def get_all_contract_platforms() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_contract_platform(platform_id: str = "eth-ethereum") -> pd.DataFrame:
     """Gets all contract addresses for given platform [Source: CoinPaprika]
     Parameters
@@ -313,7 +382,7 @@ def get_contract_platform(platform_id: str = "eth-ethereum") -> pd.DataFrame:
     Returns
     -------
     pandas.DataFrame
-         id, type, active, balance
+         id, type, active
     """
 
     session = PaprikaSession()
@@ -321,4 +390,4 @@ def get_contract_platform(platform_id: str = "eth-ethereum") -> pd.DataFrame:
         session.ENDPOINTS["contract_platform_addresses"].format(platform_id)
     )
 
-    return pd.DataFrame(contract_platforms)[["id", "type", "active", "balance"]]
+    return pd.DataFrame(contract_platforms)[["id", "type", "active"]]

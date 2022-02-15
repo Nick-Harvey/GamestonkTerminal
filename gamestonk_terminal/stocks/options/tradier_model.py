@@ -1,12 +1,17 @@
 """Tradier options model"""
 __docformat__ = "numpy"
 
+import logging
 from typing import List, Optional
 
 import pandas as pd
 import requests
 
 from gamestonk_terminal import config_terminal as cfg
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 option_columns = [
     "symbol",
@@ -35,6 +40,7 @@ default_columns = [
 ]
 
 
+@log_start_end(log=logger)
 def get_historical_options(
     ticker: str, expiry: str, strike: float, put: bool, chain_id: Optional[str]
 ) -> pd.DataFrame:
@@ -67,8 +73,8 @@ def get_historical_options(
                 "symbol"
             ].values[0]
         except IndexError:
-            print(f"Strike: {strike}, Option type: {op_type} not not found \n")
-            return pd.DataFrame
+            console.print(f"Strike: {strike}, Option type: {op_type} not not found \n")
+            return pd.DataFrame()
     else:
         symbol = chain_id
 
@@ -82,15 +88,16 @@ def get_historical_options(
     )
 
     if response.status_code != 200:
-        print("Error with request")
+        console.print("Error with request")
         return pd.DataFrame()
 
     data = response.json()["history"]
     if not data:
-        print("No historical data available")
+        console.print("No historical data available")
         return pd.DataFrame()
 
-    df_hist = pd.DataFrame(data["day"]).set_index("date")
+    df_hist = pd.DataFrame(data["day"])
+    df_hist = df_hist.set_index("date")
     df_hist.index = pd.DatetimeIndex(df_hist.index)
     return df_hist
 
@@ -98,6 +105,7 @@ def get_historical_options(
 # pylint: disable=no-else-return
 
 
+@log_start_end(log=logger)
 def option_expirations(ticker: str) -> List[str]:
     """Get available expiration dates for given ticker
 
@@ -124,13 +132,14 @@ def option_expirations(ticker: str) -> List[str]:
             dates = r.json()["expirations"]["date"]
             return dates
         except TypeError:
-            print("Error in tradier JSON response.  Check loaded ticker.\n")
+            console.print("Error in tradier JSON response.  Check loaded ticker.\n")
             return []
     else:
-        print("Tradier request failed.  Check token. \n")
+        console.print("Tradier request failed.  Check token. \n")
         return []
 
 
+@log_start_end(log=logger)
 def get_option_chains(symbol: str, expiry: str) -> pd.DataFrame:
     """Display option chains [Source: Tradier]"
 
@@ -159,13 +168,14 @@ def get_option_chains(symbol: str, expiry: str) -> pd.DataFrame:
         headers=headers,
     )
     if response.status_code != 200:
-        print("Error in request. Check TRADIER_TOKEN\n")
+        console.print("Error in request. Check TRADIER_TOKEN\n")
         return pd.DataFrame()
 
     chains = process_chains(response)
     return chains
 
 
+@log_start_end(log=logger)
 def process_chains(response: requests.models.Response) -> pd.DataFrame:
     """Function to take in the requests.get and return a DataFrame
 
@@ -184,13 +194,28 @@ def process_chains(response: requests.models.Response) -> pd.DataFrame:
 
     opt_chain = pd.DataFrame(columns=df_columns)
     for idx, option in enumerate(options):
-        data = [option[col] for col in option_columns]
-        data += [option["greeks"][col] for col in greek_columns]
-        opt_chain.loc[idx, :] = data
+        # initialize empty dictionary
+        d = {}
+        for col in df_columns:
+            d[col] = ""
+
+        # populate main dictionary values
+        for col in option_columns:
+            if col in option:
+                d[col] = option[col]
+
+        # populate greek dictionary values
+        if option["greeks"]:
+            for col in greek_columns:
+                if col in option["greeks"]:
+                    d[col] = option["greeks"][col]
+
+        opt_chain.loc[idx, :] = d
 
     return opt_chain
 
 
+@log_start_end(log=logger)
 def last_price(ticker: str):
     """Makes api request for last price
 
@@ -215,5 +240,5 @@ def last_price(ticker: str):
     if r.status_code == 200:
         return float(r.json()["quotes"]["quote"]["last"])
     else:
-        print("Error getting last price")
+        console.print("Error getting last price")
         return None

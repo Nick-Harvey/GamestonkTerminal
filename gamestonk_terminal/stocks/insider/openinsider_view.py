@@ -1,24 +1,28 @@
-import argparse
+import itertools
+import logging
+import os
 import textwrap
 from typing import List
-import itertools
-from bs4 import BeautifulSoup
-import requests
+
 import numpy as np
 import pandas as pd
-from tabulate import tabulate
-from colorama import Fore, Style
-from gamestonk_terminal.helper_funcs import (
-    check_positive,
-    parse_known_args_and_warn,
-    patch_pandas_text_adjustment,
-    try_except,
-)
-from gamestonk_terminal.stocks.insider.openinsider_model import (
-    get_open_insider_link,
-    get_open_insider_data,
-)
+import requests
+from bs4 import BeautifulSoup
+
 from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import (
+    export_data,
+    patch_pandas_text_adjustment,
+    print_rich_table,
+)
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.stocks.insider.openinsider_model import (
+    get_open_insider_data,
+    get_open_insider_link,
+)
+
+logger = logging.getLogger(__name__)
 
 d_open_insider = {
     "lcb": "latest-cluster-buys",
@@ -47,21 +51,22 @@ d_notes = {
     "A": "A: Amended filing",
     "D": "D: Derivative transaction in filing (usually option exercise)",
     "E": "E: Error detected in filing",
-    "M": "M: Multiple transactions in filing; earliest reported transaction date and weighted average transaction price",
+    "M": "M: Multiple transactions in filing; earliest reported transaction date & weighted average transaction price",
 }
 
 d_trade_types = {
-    "S - Sale": f"{Fore.RED}S - Sale: Sale of securities on an exchange or to another person{Style.RESET_ALL}",
-    "S - Sale+OE": f"{Fore.YELLOW}S - Sale+OE: Sale of securities "
-    f"on an exchange or to another person (after option exercise){Style.RESET_ALL}",
-    "F - Tax": f"{Fore.MAGENTA}F - Tax: Payment of exercise price or "
-    f"tax liability using portion of securities received from the company{Style.RESET_ALL}",
-    "P - Purchase": f"{Fore.GREEN}P - Purchase: Purchase of securities on "
-    f"an exchange or from another person{Style.RESET_ALL}",
+    "S - Sale": "[red]S - Sale: Sale of securities on an exchange or to another person[/red]",
+    "S - Sale+OE": "[yellow]S - Sale+OE: Sale of securities "
+    "on an exchange or to another person (after option exercise)[/yellow]",
+    "F - Tax": "[magenta]F - Tax: Payment of exercise price or "
+    "tax liability using portion of securities received from the company[/magenta]",
+    "P - Purchase": "[green]P - Purchase: Purchase of securities on "
+    "an exchange or from another person[/green]",
 }
 
 
-def red_highlight(values):
+@log_start_end(log=logger)
+def red_highlight(values) -> List[str]:
     """Red highlight
 
     Parameters
@@ -74,10 +79,11 @@ def red_highlight(values):
     List[str]
         colored dataframes values
     """
-    return [f"{Fore.RED}{val}{Style.RESET_ALL}" for val in values]
+    return [f"[red]{val}[/red]" for val in values]
 
 
-def yellow_highlight(values):
+@log_start_end(log=logger)
+def yellow_highlight(values) -> List[str]:
     """Yellow highlight
 
     Parameters
@@ -90,9 +96,10 @@ def yellow_highlight(values):
     List[str]
         colored dataframes values
     """
-    return [f"{Fore.YELLOW}{val}{Style.RESET_ALL}" for val in values]
+    return [f"[yellow]{val}[/yellow]" for val in values]
 
 
+@log_start_end(log=logger)
 def magenta_highlight(values):
     """Magenta highlight
 
@@ -106,9 +113,10 @@ def magenta_highlight(values):
     List[str]
         colored dataframes values
     """
-    return [f"{Fore.MAGENTA}{val}{Style.RESET_ALL}" for val in values]
+    return [f"[magenta]{val}[/magenta]" for val in values]
 
 
+@log_start_end(log=logger)
 def green_highlight(values):
     """Green highlight
 
@@ -122,46 +130,28 @@ def green_highlight(values):
     List[str]
         colored dataframes values
     """
-    return [f"{Fore.GREEN}{val}{Style.RESET_ALL}" for val in values]
+    return [f"[green]{val}[/green]" for val in values]
 
 
-@try_except
-def print_insider_data(other_args: List[str], type_insider: str):
+@log_start_end(log=logger)
+def print_insider_data(type_insider: str, limit: int = 10, export: str = ""):
     """Print insider data
 
     Parameters
     ----------
-    other_args : List[str]
-        Command line arguments to be processed with argparse
     type_insider: str
         Insider type of data
+    limit: int
+        Limit of data rows to display
+    export: str
+        Export data format
     """
-    parser = argparse.ArgumentParser(
-        add_help=False,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        prog=type_insider,
-        description=f"Print {d_open_insider[type_insider].replace('-', ' ')} [Source: OpenInsider]",
-    )
-    parser.add_argument(
-        "-n",
-        "--num",
-        action="store",
-        dest="num",
-        type=check_positive,
-        default=20,
-        help="Number of datarows to display",
-    )
-
-    ns_parser = parse_known_args_and_warn(parser, other_args)
-    if not ns_parser:
-        return
-
     response = requests.get(f"http://openinsider.com/{d_open_insider[type_insider]}")
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table", {"class": "tinytable"})
 
     if not table:
-        print("No insider information found", "\n")
+        console.print("No insider information found", "\n")
         return
 
     table_rows = table.find_all("tr")
@@ -172,7 +162,7 @@ def print_insider_data(other_args: List[str], type_insider: str):
         row = [tr.text.strip() for tr in td if tr.text.strip()]
         res.append(row)
 
-    df = pd.DataFrame(res).dropna().head(n=ns_parser.num)
+    df = pd.DataFrame(res).dropna().head(n=limit)
 
     df.columns = [
         "X",
@@ -208,99 +198,72 @@ def print_insider_data(other_args: List[str], type_insider: str):
             lambda x: "\n".join(textwrap.wrap(x, width=20)) if isinstance(x, str) else x
         )
 
-    print(
-        tabulate(
-            df,
-            headers=df.columns,
-            tablefmt="fancy_grid",
-            stralign="right",
-            showindex=False,
-        )
+    print_rich_table(
+        df,
+        headers=[x.title() for x in df.columns],
+        show_index=False,
+        title="Insider Data",
     )
+
+    export_data(export, os.path.dirname(os.path.abspath(__file__)), type_insider, df)
+
     l_chars = [list(chars) for chars in df["X"].values]
     l_uchars = np.unique(list(itertools.chain(*l_chars)))
 
     for char in l_uchars:
-        print(d_notes[char])
-    print("")
+        console.print(d_notes[char])
+    console.print("")
 
 
-@try_except
-def print_insider_filter(other_args: List[str], preset_loaded: str):
-    """Print insider filter based on loaded preset
+@log_start_end(log=logger)
+def print_insider_filter(
+    preset_loaded: str,
+    ticker: str,
+    limit: int = 10,
+    links: bool = False,
+    export: str = "",
+):
+    """Print insider filter based on loaded preset. [Source: OpenInsider]
 
     Parameters
     ----------
-    other_args : List[str]
-        Command line arguments to be processed with argparse
-    preset_loaded: str
+    preset_loaded : str
         Loaded preset filter
+    ticker : str
+        Stock ticker
+    limit : int
+        Limit of rows of data to display
+    links : bool
+        Flag to show hyperlinks
+    export : str
+        Format to export data
     """
-    parser = argparse.ArgumentParser(
-        add_help=False,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        prog="filter",
-        description="Print open insider filtered data using loaded preset, or selected ticker. [Source: OpenInsider]",
-    )
-    parser.add_argument(
-        "-n",
-        "--num",
-        action="store",
-        dest="num",
-        type=check_positive,
-        default=20,
-        help="Number of datarows to display",
-    )
-    parser.add_argument(
-        "-t",
-        "--ticker",
-        action="store",
-        dest="ticker",
-        type=str,
-        default="",
-        help="Filter latest insiders from this ticker",
-    )
-    parser.add_argument(
-        "-l",
-        "--links",
-        action="store_true",
-        default=False,
-        help="Flag to show hyperlinks",
-        dest="links",
-    )
-
-    ns_parser = parse_known_args_and_warn(parser, other_args)
-    if not ns_parser:
-        return
-
-    if ns_parser.ticker:
-        link = f"http://openinsider.com/screener?s={ns_parser.ticker}"
+    if ticker:
+        link = f"http://openinsider.com/screener?s={ticker}"
     else:
         link = get_open_insider_link(preset_loaded)
 
     if not link:
-        print("")
+        console.print("")
         return
 
-    df_insider = get_open_insider_data(
-        link, has_company_name=bool(not ns_parser.ticker)
-    )
+    df_insider = get_open_insider_data(link, has_company_name=bool(not ticker))
     df_insider_orig = df_insider.copy()
 
     if df_insider.empty:
-        print("")
+        console.print("No insider data found\n")
         return
 
-    if ns_parser.links:
+    if links:
         df_insider = df_insider[["Ticker Link", "Insider Link", "Filing Link"]].head(
-            ns_parser.num
+            limit
         )
     else:
         df_insider = df_insider.drop(
             columns=["Filing Link", "Ticker Link", "Insider Link"]
-        ).head(ns_parser.num)
+        ).head(limit)
 
-    if gtff.USE_COLOR and not ns_parser.links:
+    if gtff.USE_COLOR and not links:
         if not df_insider[df_insider["Trade Type"] == "S - Sale"].empty:
             df_insider[df_insider["Trade Type"] == "S - Sale"] = df_insider[
                 df_insider["Trade Type"] == "S - Sale"
@@ -329,20 +292,32 @@ def print_insider_filter(other_args: List[str], preset_loaded: str):
         # needs to be done because table is too large :(
         df_insider = df_insider.drop(columns=["Filing Date"])
 
-    print("")
-    print(df_insider.to_string(index=False))
+    console.print("")
+    print_rich_table(
+        df_insider,
+        headers=[x.title() for x in df_insider.columns],
+        title="Insider filtered",
+    )
 
-    if not ns_parser.links:
+    if export:
+        if preset_loaded:
+            cmd = "filter"
+        if ticker:
+            cmd = "lis"
+
+        export_data(export, os.path.dirname(os.path.abspath(__file__)), cmd, df_insider)
+
+    if not links:
         l_chars = [list(chars) for chars in df_insider_orig["X"].values]
         l_uchars = np.unique(list(itertools.chain(*l_chars)))
-        print("")
+        console.print("")
         for char in l_uchars:
-            print(d_notes[char])
+            console.print(d_notes[char])
 
         l_tradetype = df_insider_orig["Trade Type"].values
         l_utradetype = np.unique(l_tradetype)
-        print("")
+        console.print("")
         for tradetype in l_utradetype:
-            print(d_trade_types[tradetype])
+            console.print(d_trade_types[tradetype])
 
-    print("")
+    console.print("")

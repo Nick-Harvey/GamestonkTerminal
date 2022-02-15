@@ -2,16 +2,21 @@
 __docformat__ = "numpy"
 
 import json
+import logging
 import re
 from typing import Tuple
-import requests
+
 import pandas as pd
+import requests
 from bs4 import BeautifulSoup
-from gamestonk_terminal.helper_funcs import (
-    get_user_agent,
-)
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import get_user_agent
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_price_target_from_analysts(ticker: str) -> pd.DataFrame:
     """Get analysts' price targets for a given stock. [Source: Business Insider]
 
@@ -41,7 +46,7 @@ def get_price_target_from_analysts(ticker: str) -> pd.DataFrame:
         if "window.analyseChartConfigs.push" in str(script):
             # Extract config data:
             s_analyst_data = str(script).split("config: ", 1)[1].split(",\r\n", 1)[0]
-            d_analyst_data = json.loads(s_analyst_data)
+            d_analyst_data = json.loads(s_analyst_data.split(",\n")[0])
             break
 
     df_analyst_data = pd.DataFrame.from_dict(d_analyst_data["Markers"])  # type: ignore
@@ -59,6 +64,7 @@ def get_price_target_from_analysts(ticker: str) -> pd.DataFrame:
     return df_analyst_data
 
 
+@log_start_end(log=logger)
 def get_estimates(ticker: str) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Get analysts' estimates for a given ticker. [Source: Business Insider]
 

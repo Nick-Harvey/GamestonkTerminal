@@ -1,18 +1,22 @@
 """ Fidelity View """
 __docformat__ = "numpy"
 
+import logging
 import os
 import re
-from tabulate import tabulate
-from colorama import Fore, Style
+
 import pandas as pd
 
-from gamestonk_terminal.helper_funcs import export_data
 from gamestonk_terminal import feature_flags as gtff
-
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.discovery import fidelity_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def buy_sell_ratio_color_red_green(val: str) -> str:
     """Add color tags to the Buys/Sells ratio cell
 
@@ -36,11 +40,12 @@ def buy_sell_ratio_color_red_green(val: str) -> str:
     sells = int(buy_sell_match.group(2))
 
     if buys >= sells:
-        return f"{Fore.GREEN}{buys}%{Style.RESET_ALL} Buys, {sells}% Sells"
+        return f"[green]{buys}%[/green] Buys, {sells}% Sells"
 
-    return f"{buys}% Buys, {Fore.RED}{sells}%{Style.RESET_ALL} Sells"
+    return f"{buys}% Buys, [red]{sells}%[/red] Sells"
 
 
+@log_start_end(log=logger)
 def price_change_color_red_green(val: str) -> str:
     """Add color tags to the price change cell
 
@@ -57,12 +62,11 @@ def price_change_color_red_green(val: str) -> str:
 
     val_float = float(val.split(" ")[0])
     if val_float > 0:
-        color = Fore.GREEN
-    else:
-        color = Fore.RED
-    return color + val + Style.RESET_ALL
+        return f"[green]{val}[/green]"
+    return f"[red]{val}[/red]"
 
 
+@log_start_end(log=logger)
 def orders_view(num: int, export: str):
     """Prints last N orders by Fidelity customers. [Source: Fidelity]
 
@@ -74,7 +78,6 @@ def orders_view(num: int, export: str):
         Export dataframe data to csv,json,xlsx file
     """
     order_header, df_orders = fidelity_model.get_orders()
-    print(order_header, ":")
 
     pd.set_option("display.max_colwidth", None)
 
@@ -88,16 +91,13 @@ def orders_view(num: int, export: str):
 
     df_orders = df_orders.head(n=num).iloc[:, :-1]
 
-    print(
-        tabulate(
-            df_orders,
-            headers=df_orders.columns,
-            floatfmt=".2f",
-            showindex=False,
-            tablefmt="fancy_grid",
-        )
+    print_rich_table(
+        df_orders,
+        headers=[x.title() for x in df_orders.columns],
+        show_index=False,
+        title=f"{order_header}:",
     )
-    print("")
+    console.print("")
 
     export_data(
         export,

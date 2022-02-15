@@ -4,38 +4,46 @@ __docformat__ = "numpy"
 # pylint: disable=C0302
 
 import argparse
+import difflib
+from datetime import datetime, timedelta
 from typing import List
 
 from prompt_toolkit.completion import NestedCompleter
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
+from gamestonk_terminal.cryptocurrency.due_diligence.glassnode_model import (
+    GLASSNODE_SUPPORTED_HASHRATE_ASSETS,
+    INTERVALS_HASHRATE,
+)
+from gamestonk_terminal.cryptocurrency.due_diligence.glassnode_view import (
+    display_hashrate,
+)
 
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
+    EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     parse_known_args_and_warn,
     check_positive,
     check_int_range,
-    try_except,
-    system_clear,
+    EXPORT_ONLY_RAW_DATA_ALLOWED,
+    valid_date,
 )
 
 from gamestonk_terminal.cryptocurrency.onchain import (
+    blockchain_view,
     ethgasstation_view,
+    ethplorer_model,
+    whale_alert_model,
     whale_alert_view,
     ethplorer_view,
+    bitquery_view,
+    bitquery_model,
 )
 
 
-class OnchainController:
+class OnchainController(BaseController):
     """Onchain Controller class"""
-
-    CHOICES = [
-        "cls",
-        "?",
-        "help",
-        "q",
-        "quit",
-    ]
 
     SPECIFIC_CHOICES = {
         "account": [
@@ -52,6 +60,7 @@ class OnchainController:
     }
 
     CHOICES_COMMANDS = [
+        "hr",
         "gwei",
         "whales",
         "balance",
@@ -63,73 +72,253 @@ class OnchainController:
         "th",
         "prices",
         "address",
-        "active",
+        "lt",
+        "dvcp",
+        "tv",
+        "ueat",
+        "ttcp",
+        "baas",
+        "btccp",
+        "btcct",
     ]
 
-    CHOICES += CHOICES_COMMANDS
+    PATH = "/crypto/onchain/"
 
-    def __init__(self):
+    def __init__(self, queue: List[str] = None):
         """Constructor"""
-        self.onchain_parser = argparse.ArgumentParser(add_help=False, prog="onchain")
-        self.onchain_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
+        super().__init__(queue)
+
+        self.address = ""
+        self.address_type = ""
+
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            choices["whales"]["-s"] = {c: None for c in whale_alert_model.FILTERS}
+            choices["hr"] = {c: None for c in GLASSNODE_SUPPORTED_HASHRATE_ASSETS}
+            choices["hr"]["-c"] = {c: None for c in GLASSNODE_SUPPORTED_HASHRATE_ASSETS}
+            choices["hr"]["--coin"] = {
+                c: None for c in GLASSNODE_SUPPORTED_HASHRATE_ASSETS
+            }
+            choices["hr"]["-i"] = {c: None for c in INTERVALS_HASHRATE}
+            choices["ttcp"] = {c: None for c in bitquery_model.DECENTRALIZED_EXCHANGES}
+            choices["baas"]["-c"] = {c: None for c in bitquery_model.POSSIBLE_CRYPTOS}
+            choices["baas"]["--coin"] = {
+                c: None for c in bitquery_model.POSSIBLE_CRYPTOS
+            }
+            choices["balance"]["-s"] = {
+                c: None for c in ethplorer_model.BALANCE_FILTERS
+            }
+            choices["holders"]["-s"] = {
+                c: None for c in ethplorer_model.HOLDERS_FILTERS
+            }
+            choices["hist"]["-s"] = {c: None for c in ethplorer_model.HIST_FILTERS}
+            choices["top"]["-s"] = {c: None for c in ethplorer_model.TOP_FILTERS}
+            choices["th"]["-s"] = {c: None for c in ethplorer_model.TH_FILTERS}
+            choices["prices"]["-s"] = {c: None for c in ethplorer_model.PRICES_FILTERS}
+            choices["lt"]["-s"] = {c: None for c in bitquery_model.LT_FILTERS}
+            choices["tv"]["-s"] = {c: None for c in bitquery_model.LT_FILTERS}
+            choices["ueat"]["-s"] = {c: None for c in bitquery_model.UEAT_FILTERS}
+            choices["ueat"]["-i"] = {c: None for c in bitquery_model.INTERVALS}
+            choices["dvcp"]["-s"] = {c: None for c in bitquery_model.DVCP_FILTERS}
+            choices["lt"]["-k"] = {c: None for c in bitquery_model.LT_KIND}
+            choices["lt"]["-vs"] = {c: None for c in bitquery_model.CURRENCIES}
+            choices["ttcp"] = {c: None for c in bitquery_model.DECENTRALIZED_EXCHANGES}
+            choices["ttcp"]["-s"] = {c: None for c in bitquery_model.TTCP_FILTERS}
+            choices["baas"]["-s"] = {c: None for c in bitquery_model.BAAS_FILTERS}
+            self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def print_help(self):
+        """Print help"""
+        has_account_start = "[unvl]" if self.address_type != "account" else ""
+        has_account_end = "[unvl]" if self.address_type != "account" else ""
+
+        has_token_start = "[unvl]" if self.address_type != "token" else ""
+        has_token_end = "[unvl]" if self.address_type != "token" else ""
+
+        has_tx_start = "[unvl]" if self.address_type != "tx" else ""
+        has_tx_end = "[unvl]" if self.address_type != "tx" else ""
+
+        help_text = f"""[cmds]
+[src][Glassnode][/src]
+    hr               check blockchain hashrate over time (BTC or ETH)
+[src][Blockchain][/src]
+    btccp            displays BTC circulating supply
+    btcct            displays BTC confirmed transactions
+[src][Eth Gas Station][/src]
+    gwei             check current eth gas fees
+[src][Whale Alert][/src]
+    whales           check crypto wales transactions
+[src][BitQuery][/src]
+    lt               last trades by dex or month
+    dvcp             daily volume for crypto pair
+    tv               token volume on DEXes
+    ueat             unique ethereum addresses which made a transaction
+    ttcp             top traded crypto pairs on given decentralized exchange
+    baas             bid, ask prices, average spread for given crypto pair
+
+[param]Ethereum address: [/param]{self.address}
+[param]Address type: [/param]{self.address_type if self.address_type else ''}
+
+[src][Ethplorer][/src] [info]Ethereum:[/info]
+    address         load ethereum address of token, account or transaction
+    top             top ERC20 tokens{has_account_start}
+    balance         check ethereum balance
+    hist            ethereum balance history (transactions){has_account_end}{has_token_start}
+    info            ERC20 token info
+    holders         top ERC20 token holders
+    th              ERC20 token history
+    prices          ERC20 token historical prices{has_token_end}{has_tx_start}
+    tx              ethereum blockchain transaction info{has_tx_end}
+    """
+        console.print(text=help_text, menu="Cryptocurrency - Onchain")
+
+    def call_btcct(self, other_args: List[str]):
+        """Process btcct command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="btcct",
+            description="""
+                Display BTC confirmed transactions [Source: https://api.blockchain.info/]
+            """,
         )
-        self.address = None
-        self.address_type = None
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
-
-        Parameters
-        -------
-        an_input : str
-            string with input arguments
-
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self.onchain_parser.parse_known_args(
-            an_input.split()
+        parser.add_argument(
+            "-s",
+            "--since",
+            dest="since",
+            type=valid_date,
+            help="Initial date. Default: 2010-01-01",
+            default=datetime(2010, 1, 1).strftime("%Y-%m-%d"),
         )
 
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
+        parser.add_argument(
+            "-u",
+            "--until",
+            dest="until",
+            type=valid_date,
+            help="Final date. Default: 2021-01-01",
+            default=(datetime.now()).strftime("%Y-%m-%d"),
+        )
 
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
 
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
+        if ns_parser:
+            blockchain_view.display_btc_confirmed_transactions(
+                since=int(datetime.timestamp(ns_parser.since)),
+                until=int(datetime.timestamp(ns_parser.until)),
+                export=ns_parser.export,
+            )
 
-    def call_help(self, *_):
-        """Process Help command"""
-        self.print_help()
+    def call_btccp(self, other_args: List[str]):
+        """Process btccp command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="btccp",
+            description="""
+                Display BTC circulating supply [Source: https://api.blockchain.info/]
+            """,
+        )
 
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
+        parser.add_argument(
+            "-s",
+            "--since",
+            dest="since",
+            type=valid_date,
+            help="Initial date. Default: 2010-01-01",
+            default=datetime(2010, 1, 1).strftime("%Y-%m-%d"),
+        )
 
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
+        parser.add_argument(
+            "-u",
+            "--until",
+            dest="until",
+            type=valid_date,
+            help="Final date. Default: 2021-01-01",
+            default=(datetime.now()).strftime("%Y-%m-%d"),
+        )
 
-    @try_except
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+
+        if ns_parser:
+            blockchain_view.display_btc_circulating_supply(
+                since=int(datetime.timestamp(ns_parser.since)),
+                until=int(datetime.timestamp(ns_parser.until)),
+                export=ns_parser.export,
+            )
+
+    def call_hr(self, other_args: List[str]):
+        """Process hr command"""
+
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="hr",
+            description="""
+                Display mean hashrate for a certain blockchain (ETH or BTC)
+                [Source: https://glassnode.org]
+            """,
+        )
+
+        parser.add_argument(
+            "-c",
+            "--coin",
+            dest="coin",
+            type=str,
+            help="Coin to check hashrate (BTC or ETH)",
+            default="BTC",
+            choices=GLASSNODE_SUPPORTED_HASHRATE_ASSETS,
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interval",
+            dest="interval",
+            type=str,
+            help="Frequency interval. Default: 24h",
+            default="24h",
+            choices=INTERVALS_HASHRATE,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--since",
+            dest="since",
+            type=valid_date,
+            help="Initial date. Default: 2020-01-01",
+            default=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d"),
+        )
+
+        parser.add_argument(
+            "-u",
+            "--until",
+            dest="until",
+            type=valid_date,
+            help="Final date. Default: 2021-01-01",
+            default=(datetime.now()).strftime("%Y-%m-%d"),
+        )
+
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-c")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+
+        if ns_parser:
+            display_hashrate(
+                asset=ns_parser.coin,
+                interval=ns_parser.interval,
+                since=int(datetime.timestamp(ns_parser.since)),
+                until=int(datetime.timestamp(ns_parser.until)),
+                export=ns_parser.export,
+            )
+
     def call_gwei(self, other_args: List[str]):
         """Process gwei command"""
         parser = argparse.ArgumentParser(
@@ -142,21 +331,12 @@ class OnchainController:
             """,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-
-        if not ns_parser:
-            return
-
-        ethgasstation_view.display_gwei_fees(export=ns_parser.export)
+        if ns_parser:
+            ethgasstation_view.display_gwei_fees(export=ns_parser.export)
 
     def call_whales(self, other_args: List[str]):
         """Process whales command"""
@@ -174,17 +354,17 @@ class OnchainController:
             "-m",
             "--min",
             dest="min",
-            type=check_int_range(500000, 100 ** 7),
+            type=check_int_range(500000, 100**7),
             help="Minimum value of transactions.",
             default=1000000,
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -195,16 +375,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: date",
             default="date",
-            choices=[
-                "date",
-                "symbol",
-                "blockchain",
-                "amount",
-                "amount_usd",
-                "from",
-                "to",
-            ],
+            choices=whale_alert_model.FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -215,39 +388,25 @@ class OnchainController:
 
         parser.add_argument(
             "-a",
-            "--balance",
-            dest="balance",
+            "--address",
+            dest="address",
             action="store_true",
             help="Flag to show addresses of transaction",
             default=False,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser:
-                return
-
+        if ns_parser:
             whale_alert_view.display_whales_transactions(
                 min_value=ns_parser.min,
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 show_address=ns_parser.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
 
     def call_address(self, other_args: List[str]):
         """Process address command"""
@@ -294,23 +453,20 @@ class OnchainController:
             required="-h" not in other_args,
         )
 
-        try:
-            if other_args:
-                if not other_args[0][0] == "-":
-                    other_args.insert(0, "--address")
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "--address")
 
-            ns_parser = parse_known_args_and_warn(parser, other_args)
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
 
-            if not ns_parser:
-                return
-
+        if ns_parser:
             if len(ns_parser.address) not in [42, 66]:
-                print(
+                console.print(
                     f"Couldn't load address {ns_parser.address}. "
                     f"Token or account address should be 42 characters long. "
                     f"Transaction hash should be 66 characters long\n"
                 )
-                return
 
             if ns_parser.account:
                 address_type = "account"
@@ -327,10 +483,6 @@ class OnchainController:
             self.address = ns_parser.address
             self.address_type = address_type
 
-            print(f"Address loaded {self.address}\n")
-        except Exception as e:
-            print(e)
-
     def call_balance(self, other_args: List[str]):
         """Process balance command"""
         parser = argparse.ArgumentParser(
@@ -344,11 +496,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -359,13 +511,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: index",
             default="index",
-            choices=[
-                "index",
-                "balance",
-                "tokenName",
-                "tokenSymbol",
-            ],
+            choices=ethplorer_model.BALANCE_FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -374,31 +522,20 @@ class OnchainController:
             default=True,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_address_info(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 address=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_hist(self, other_args: List[str]):
         """Process hist command"""
@@ -414,11 +551,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -429,8 +566,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: timestamp",
             default="timestamp",
-            choices=["timestamp", "transactionHash", "token", "value"],
+            choices=ethplorer_model.HIST_FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -439,31 +577,20 @@ class OnchainController:
             default=True,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_address_history(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 address=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_holders(self, other_args: List[str]):
         """Process holders command"""
@@ -478,11 +605,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -493,12 +620,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: share",
             default="share",
-            choices=[
-                "balance",
-                "balance",
-                "share",
-            ],
+            choices=ethplorer_model.HOLDERS_FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -507,31 +631,20 @@ class OnchainController:
             default=False,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_top_token_holders(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 address=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_top(self, other_args: List[str]):
         """Process top command"""
@@ -546,11 +659,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -561,15 +674,7 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: rank",
             default="rank",
-            choices=[
-                "rank",
-                "name",
-                "symbol",
-                "price",
-                "txsCount",
-                "transfersCount",
-                "holdersCount",
-            ],
+            choices=ethplorer_model.TOP_FILTERS,
         )
 
         parser.add_argument(
@@ -580,30 +685,17 @@ class OnchainController:
             default=True,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser:
-                return
-
+        if ns_parser:
             ethplorer_view.display_top_tokens(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
 
     def call_info(self, other_args: List[str]):
         """Process info command"""
@@ -625,29 +717,18 @@ class OnchainController:
             default=False,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_token_info(
                 social=ns_parser.social,
                 address=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_th(self, other_args: List[str]):
         """Process th command"""
@@ -663,11 +744,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -678,10 +759,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: value",
             default="value",
-            choices=[
-                "value",
-            ],
+            choices=ethplorer_model.TH_FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -698,33 +778,21 @@ class OnchainController:
             default=True,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_token_history(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 hash_=ns_parser.hash,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 address=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_tx(self, other_args: List[str]):
         """Process tx command"""
@@ -739,29 +807,17 @@ class OnchainController:
               """,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_tx_info(
                 tx_hash=self.address,
                 export=ns_parser.export,
             )
-
-        except Exception as e:
-            print(e)
+        else:
+            console.print("You need to set an ethereum address\n")
 
     def call_prices(self, other_args: List[str]):
         """Process prices command"""
@@ -776,11 +832,11 @@ class OnchainController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="display N number records",
             default=10,
         )
 
@@ -791,16 +847,9 @@ class OnchainController:
             type=str,
             help="Sort by given column. Default: date",
             default="date",
-            choices=[
-                "date",
-                "cap",
-                "volumeConverted",
-                "open",
-                "high",
-                "close",
-                "low",
-            ],
+            choices=ethplorer_model.PRICES_FILTERS,
         )
+
         parser.add_argument(
             "--descend",
             action="store_false",
@@ -809,102 +858,530 @@ class OnchainController:
             default=False,
         )
 
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        try:
-            ns_parser = parse_known_args_and_warn(parser, other_args)
-
-            if not ns_parser or not self.address:
-                return
-
+        if ns_parser and self.address:
             ethplorer_view.display_token_historical_prices(
-                top=ns_parser.top,
+                top=ns_parser.limit,
                 sortby=ns_parser.sortby,
                 descend=ns_parser.descend,
                 address=self.address,
                 export=ns_parser.export,
             )
+        else:
+            console.print("You need to set an ethereum address\n")
 
-        except Exception as e:
-            print(e)
-
-    def print_help(self):
-        """Print help"""
-        help_text = """
-Onchain:
-    cls         clear screen
-    ?/help      show this menu again
-    q           quit this menu, and shows back to main menu
-    quit        quit to abandon the program
-
-Eth Gas Station:
-    gwei              check current eth gas fees
-
-Whale Alert:
-    whales            check crypto wales transactions
-"""
-        help_text += f"\nEthereum address: {self.address if self.address else '?'}"
-        help_text += (
-            f"\nAddress type: {self.address_type if self.address_type else '?'}\n"
+    def call_lt(self, other_args: List[str]):
+        """Process lt command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="lt",
+            description="""
+                      Display Trades on Decentralized Exchanges aggregated by DEX or Month
+                      [Source: https://graphql.bitquery.io/]
+                  """,
         )
 
-        help_text += """
-Ethereum [Ethplorer]:
-    address           load ethereum address of token, account or transaction
-    top               top ERC20 tokens"""
+        parser.add_argument(
+            "-k",
+            "--kind",
+            dest="kind",
+            type=str,
+            help="Aggregate trades by dex or time Default: dex",
+            default="dex",
+            choices=bitquery_model.LT_KIND,
+        )
 
-        if self.address_type == "account":
-            help_text += """
-    balance           check ethereum balance balance
-    hist              ethereum balance history (transactions)"""
+        parser.add_argument(
+            "-vs",
+            "--vs",
+            dest="vs",
+            type=str,
+            help="Currency of displayed trade amount.",
+            default="USD",
+            choices=bitquery_model.CURRENCIES,
+        )
 
-        if self.address_type == "token":
-            help_text += """
-    info              ERC20 token info
-    holders           top ERC20 token holders
-    th                ERC20 token history
-    prices            ERC20 token historical prices"""
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="display N number records",
+            default=10,
+        )
 
-        if self.address_type == "tx":
-            help_text += """
-    tx                ethereum blockchain transaction info"""
+        parser.add_argument(
+            "-d",
+            "--days",
+            dest="days",
+            type=check_positive,
+            help="Number of days to display data for.",
+            default=90,
+        )
 
-        print(help_text, "\n")
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column. Default: tradeAmount. For monthly trades date.",
+            default="tradeAmount",
+            choices=bitquery_model.LT_FILTERS,
+        )
 
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
 
-def menu():
-    """Onchain Menu"""
-    onchain_controller = OnchainController()
-    onchain_controller.call_help(None)
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
 
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in onchain_controller.CHOICES}
+        if ns_parser:
+            bitquery_view.display_dex_trades(
+                kind=ns_parser.kind,
+                trade_amount_currency=ns_parser.vs,
+                top=ns_parser.limit,
+                days=ns_parser.days,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
             )
-            an_input = session.prompt(
-                f"{get_flair()} (crypto)>(onchain)> ",
-                completer=completer,
+
+    def call_dvcp(self, other_args: List[str]):
+        """Process dvcp command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="dvcp",
+            description="""
+                      Display daily volume for given crypto pair
+                      [Source: https://graphql.bitquery.io/]
+                  """,
+        )
+
+        parser.add_argument(
+            "-c",
+            "--coin",
+            dest="coin",
+            type=str,
+            help="ERC20 token symbol or address.",
+            required="-h" not in other_args,
+        )
+
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="display N number records",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-vs", "--vs", dest="vs", type=str, help="Quote currency", default="USDT"
+        )
+
+        parser.add_argument(
+            "-d",
+            "--days",
+            dest="days",
+            type=check_positive,
+            help="Number of days to display data for.",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column.",
+            default="date",
+            choices=bitquery_model.DVCP_FILTERS,
+        )
+
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-c")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            bitquery_view.display_daily_volume_for_given_pair(
+                token=ns_parser.coin,
+                vs=ns_parser.vs,
+                top=ns_parser.days,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
             )
-        else:
-            an_input = input(f"{get_flair()} (crypto)>(onchain)> ")
 
-        try:
-            process_input = onchain_controller.switch(an_input)
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue
+    def call_tv(self, other_args: List[str]):
+        """Process tv command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="tv",
+            description="""
+                      Display token volume on different Decentralized Exchanges.
+                      [Source: https://graphql.bitquery.io/]
+                  """,
+        )
 
-        if process_input is False:
-            return False
+        parser.add_argument(
+            "-c",
+            "--coin",
+            dest="coin",
+            type=str,
+            help="ERC20 token symbol or address.",
+            required="-h" not in other_args,
+        )
 
-        if process_input is True:
-            return True
+        parser.add_argument(
+            "-vs",
+            "--vs",
+            dest="vs",
+            type=str,
+            help="Currency of displayed trade amount.",
+            default="USD",
+            choices=bitquery_model.CURRENCIES,
+        )
+
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="display N number records",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column.",
+            default="trades",
+            choices=bitquery_model.LT_FILTERS,
+        )
+
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-c")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            bitquery_view.display_dex_volume_for_token(
+                token=ns_parser.coin,
+                trade_amount_currency=ns_parser.vs,
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
+
+    def call_ueat(self, other_args: List[str]):
+        """Process ueat command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="ueat",
+            description="""
+                      Display number of unique ethereum addresses which made a transaction in given time interval,
+                      [Source: https://graphql.bitquery.io/]
+                  """,
+        )
+
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="display N number records. (Maximum available time period is 90 days."
+            "Depending on chosen time period, display N records will be recalculated. E.g."
+            "For interval: month, and number: 10, period of calculation equals to 300, "
+            "but because of max days limit: 90, it will only return last 3 months (3 records). ",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column.",
+            default="date",
+            choices=bitquery_model.UEAT_FILTERS,
+        )
+
+        parser.add_argument(
+            "-i",
+            "--interval",
+            dest="interval",
+            type=str,
+            help="Time interval in which ethereum address made transaction. month, week or day. "
+            "Maximum time period is 90 days (3 months, 14 weeks)",
+            default="day",
+            choices=bitquery_model.INTERVALS,
+        )
+
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            bitquery_view.display_ethereum_unique_senders(
+                interval=ns_parser.interval,
+                limit=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
+
+    def call_ttcp(self, other_args: List[str]):
+        """Process ttcp command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="ttcp",
+            description="""
+                      Display most traded crypto pairs on given decentralized exchange in chosen time period.
+                      [Source: https://graphql.bitquery.io/]
+                  """,
+        )
+
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="display N number records",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-e",
+            "--exchange",
+            dest="exchange",
+            type=str,
+            help="Decentralized exchange name.",
+            choices=bitquery_model.DECENTRALIZED_EXCHANGES,
+        )
+
+        parser.add_argument(
+            "-d",
+            "--days",
+            dest="days",
+            type=check_positive,
+            help="Number of days to display data for.",
+            default=30,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column.",
+            default="tradeAmount",
+            choices=bitquery_model.TTCP_FILTERS,
+        )
+
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-e")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            exchange = "Uniswap"
+            if ns_parser.exchange:
+                if ns_parser.exchange in bitquery_model.DECENTRALIZED_EXCHANGES:
+                    exchange = ns_parser.exchange
+                else:
+                    similar_cmd = difflib.get_close_matches(
+                        ns_parser.exchange,
+                        bitquery_model.DECENTRALIZED_EXCHANGES,
+                        n=1,
+                        cutoff=0.75,
+                    )
+
+                    if similar_cmd:
+                        console.print(f"Replacing by '{similar_cmd[0]}'")
+                        exchange = similar_cmd[0]
+
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            ns_parser.exchange,
+                            bitquery_model.DECENTRALIZED_EXCHANGES,
+                            n=1,
+                            cutoff=0.5,
+                        )
+                        if similar_cmd:
+                            console.print(f"Did you mean '{similar_cmd[0]}'?")
+
+                        console.print(
+                            f"Couldn't find any exchange with provided name: {ns_parser.exchange}. "
+                            f"Please choose one from list: {bitquery_model.DECENTRALIZED_EXCHANGES}\n"
+                        )
+
+            else:
+                console.print("Exchange not provided setting default to Uniswap.\n")
+
+            bitquery_view.display_most_traded_pairs(
+                days=ns_parser.days,
+                top=ns_parser.limit,
+                exchange=exchange,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
+
+    def call_baas(self, other_args: List[str]):
+        """Process baas command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="baas",
+            description="""
+                      Display average bid, ask prices, spread for given crypto pair for chosen time period
+                      [Source: https://graphql.bitquery.io/]
+                  """,
+        )
+
+        parser.add_argument(
+            "-c",
+            "--coin",
+            dest="coin",
+            type=str,
+            help="ERC20 token symbol or address.",
+        )
+
+        parser.add_argument(
+            "-vs", "--vs", dest="vs", type=str, help="Quote currency", default="USDT"
+        )
+
+        parser.add_argument(
+            "-d",
+            "--days",
+            dest="days",
+            type=check_positive,
+            help="Number of days to display data for.",
+            default=10,
+        )
+
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column.",
+            default="date",
+            choices=bitquery_model.BAAS_FILTERS,
+        )
+
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-c")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            if ns_parser.coin:
+                if ns_parser.coin in bitquery_model.POSSIBLE_CRYPTOS:
+                    bitquery_view.display_spread_for_crypto_pair(
+                        token=ns_parser.coin,
+                        vs=ns_parser.vs,
+                        days=ns_parser.days,
+                        sortby=ns_parser.sortby,
+                        descend=ns_parser.descend,
+                        export=ns_parser.export,
+                    )
+
+                else:
+                    console.print(f"Coin '{ns_parser.coin}' does not exist.")
+                    if ns_parser.coin.upper() == "BTC":
+                        token = "WBTC"
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            ns_parser.coin,
+                            bitquery_model.POSSIBLE_CRYPTOS,
+                            n=1,
+                            cutoff=0.75,
+                        )
+                        token = similar_cmd[0]
+                    if similar_cmd[0]:
+                        console.print(f"Replacing with '{token}'")
+                        bitquery_view.display_spread_for_crypto_pair(
+                            token=token,
+                            vs=ns_parser.vs,
+                            days=ns_parser.days,
+                            sortby=ns_parser.sortby,
+                            descend=ns_parser.descend,
+                            export=ns_parser.export,
+                        )
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            ns_parser.coin,
+                            bitquery_model.POSSIBLE_CRYPTOS,
+                            n=1,
+                            cutoff=0.5,
+                        )
+                        if similar_cmd:
+                            console.print(f"Did you mean '{similar_cmd[0]}'?")
+
+            else:
+                console.print("You didn't provide coin symbol.\n")

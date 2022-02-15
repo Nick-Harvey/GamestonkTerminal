@@ -1,12 +1,19 @@
 "Polygon Model"
 __docformat__ = "numpy"
 
+import logging
 from typing import List, Tuple
 
 import requests
+
 from gamestonk_terminal import config_terminal as cfg
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_similar_companies(ticker: str, us_only: bool) -> Tuple[List[str], str]:
     """Get similar companies from Polygon
 
@@ -39,7 +46,7 @@ def get_similar_companies(ticker: str, us_only: bool) -> Tuple[List[str], str]:
                     us_similar.append(sym)
                 similar = us_similar
     else:
-        print(result.json()["error"])
+        console.print(result.json()["error"])
         similar = [""]
         source = "Error"
     return similar, source

@@ -1,6 +1,7 @@
-import discord
-import discordbot.config_discordbot as cfg
+import disnake
 
+import discordbot.config_discordbot as cfg
+from discordbot.config_discordbot import logger
 from gamestonk_terminal.stocks.technical_analysis import tradingview_model
 
 
@@ -11,7 +12,7 @@ async def recom_command(ctx, ticker=""):
 
         # Debug
         if cfg.DEBUG:
-            print(f"!stocks.ta.recom {ticker}")
+            logger.debug("!stocks.ta.recom %s", ticker)
 
         # Check for argument
         if ticker == "":
@@ -24,7 +25,7 @@ async def recom_command(ctx, ticker=""):
         recom = recom[["BUY", "NEUTRAL", "SELL", "RECOMMENDATION"]]
 
         report = "```" + recom.to_string() + "```"
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="Stocks: [Tradingview API] Recommendation based on TA",
             description=report,
             colour=cfg.COLOR,
@@ -37,7 +38,7 @@ async def recom_command(ctx, ticker=""):
         await ctx.send(embed=embed)
 
     except Exception as e:
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="ERROR Stocks: [Tradingview API] Recommendation based on TA",
             colour=cfg.COLOR,
             description=e,
@@ -47,4 +48,4 @@ async def recom_command(ctx, ticker=""):
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

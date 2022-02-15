@@ -1,12 +1,18 @@
 """ Yahoo Finance View """
 __docformat__ = "numpy"
 
+import logging
 import os
-from tabulate import tabulate
-from gamestonk_terminal.helper_funcs import export_data
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.dark_pool_shorts import yahoofinance_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def display_most_shorted(num_stocks: int, export: str):
     """Display most shorted stocks screener. [Source: Yahoo Finance]
 
@@ -22,18 +28,12 @@ def display_most_shorted(num_stocks: int, export: str):
     df = df.replace(float("NaN"), "")
 
     if df.empty:
-        print("No data found.")
+        console.print("No data found.")
     else:
-        print(
-            tabulate(
-                df,
-                headers=df.columns,
-                floatfmt=".2f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            )
+        print_rich_table(
+            df, headers=list(df.columns), show_index=False, title="Most Shorted Stocks"
         )
-    print("")
+    console.print("")
 
     export_data(
         export,

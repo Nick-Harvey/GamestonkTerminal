@@ -1,17 +1,24 @@
 """Finbrain Crypto Sentiment Analysis"""
 __docformat__ = "numpy"
 
+import logging
 import os
+
 import pandas as pd
+
 from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.common.behavioural_analysis.finbrain_model import get_sentiment
 from gamestonk_terminal.common.behavioural_analysis.finbrain_view import (
     plot_sentiment,
     sentiment_coloring,
 )
-from gamestonk_terminal.common.behavioural_analysis.finbrain_model import get_sentiment
+from gamestonk_terminal.decorators import log_start_end
 from gamestonk_terminal.helper_funcs import export_data
+from gamestonk_terminal.rich_config import console
 
-PATH = os.path.dirname(os.path.abspath(__file__))
+logger = logging.getLogger(__name__)
+
+PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     COINS_JSON = pd.read_json(PATH + "/data/finbrain_coins.json")
@@ -20,6 +27,7 @@ except ValueError:
     COINS = None
 
 
+@log_start_end(log=logger)
 def display_crypto_sentiment_analysis(coin: str, export: str) -> None:
     """Sentiment analysis from FinBrain for Cryptocurrencies
 
@@ -43,21 +51,21 @@ def display_crypto_sentiment_analysis(coin: str, export: str) -> None:
     )  # Currently only USD pairs are available
 
     if df_sentiment.empty:
-        print(f"Couldn't find Sentiment Data for {coin}\n")
+        console.print(f"Couldn't find Sentiment Data for {coin}\n")
         return
 
     plot_sentiment(df_sentiment, coin)
     df_sentiment.sort_index(ascending=True, inplace=True)
 
     if gtff.USE_COLOR:
-        print(
+        console.print(
             df_sentiment["Sentiment Analysis"]
             .apply(sentiment_coloring, last_val=0)
             .to_string(),
             "\n",
         )
     else:
-        print(df_sentiment.to_string(), "\n")
+        console.print(df_sentiment.to_string(), "\n")
 
     export_data(
         export,

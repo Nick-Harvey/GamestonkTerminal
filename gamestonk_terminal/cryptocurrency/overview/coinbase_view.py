@@ -1,15 +1,22 @@
 """Coinbase view"""
 __docformat__ = "numpy"
 
+import logging
 import os
 
-from tabulate import tabulate
-from gamestonk_terminal.helper_funcs import export_data
-from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.cryptocurrency.overview import coinbase_model
-from gamestonk_terminal.helper_funcs import long_number_format
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import (
+    export_data,
+    long_number_format,
+    print_rich_table,
+)
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_trading_pairs(top: int, sortby: str, descend: bool, export: str) -> None:
     """Displays a list of available currency pairs for trading. [Source: Coinbase]
 
@@ -38,19 +45,13 @@ def display_trading_pairs(top: int, sortby: str, descend: bool, export: str) -> 
 
     df = df.sort_values(by=sortby, ascending=descend).head(top)
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df,
-                headers=df.columns,
-                floatfmt=".2f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df,
+        headers=list(df.columns),
+        show_index=False,
+        title="Available Pairs for Trading",
+    )
+    console.print("")
 
     export_data(
         export,

@@ -4,27 +4,23 @@ __docformat__ = "numpy"
 import argparse
 from typing import List
 from prompt_toolkit.completion import NestedCompleter
-
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal.stocks.fundamental_analysis.financial_modeling_prep import (
     fmp_view,
 )
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
     parse_known_args_and_warn,
     check_positive,
     EXPORT_ONLY_RAW_DATA_ALLOWED,
-    try_except,
-    system_clear,
 )
 from gamestonk_terminal.menu import session
 
 
-class FinancialModelingPrepController:
-    """Financial Modeling Prep Controller"""
+class FinancialModelingPrepController(BaseController):
+    """Financial Modeling Prep Controller class"""
 
-    # Command choices
-    CHOICES = ["cls", "?", "help", "q", "quit"]
     CHOICES_COMMANDS = [
         "profile",
         "quote",
@@ -37,40 +33,30 @@ class FinancialModelingPrepController:
         "ratios",
         "growth",
     ]
-    CHOICES += CHOICES_COMMANDS
+    PATH = "/stocks/fa/fmp/"
 
-    def __init__(self, ticker: str, start: str, interval: str):
-        """Constructor
-
-        Parameters
-        ----------
-        ticker : str
-            Fundamental analysis ticker symbol
-        start : str
-            Stat date of the stock data
-        interval : str
-            Stock data interval
-        """
+    def __init__(
+        self,
+        ticker: str,
+        start: str,
+        interval: str,
+        queue: List[str] = None,
+    ):
+        """Constructor"""
+        super().__init__(queue)
 
         self.ticker = ticker
         self.start = start
         self.interval = interval
-        self.fmp_parser = argparse.ArgumentParser(add_help=False, prog="fmp")
-        self.fmp_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
-        )
+
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
         """Print help"""
         help_text = f"""
-Financial Modeling Prep:
-    cls           clear screen
-    ?/help        show this menu again
-    q             quit this menu, and shows back to main menu
-    quit          quit to abandon program
-
-Ticker: {self.ticker}
+[param]Ticker: [/param]{self.ticker}[cmds]
 
     profile       profile of the company
     quote         quote of the company
@@ -81,55 +67,19 @@ Ticker: {self.ticker}
     cash          cash flow statement of the company
     metrics       key metrics of the company
     ratios        financial ratios of the company
-    growth        financial statement growth of the company
+    growth        financial statement growth of the company[/cmds]
         """
-        print(help_text)
+        console.print(
+            text=help_text,
+            menu="Stocks - Fundamental Analysis - Financial Modeling Prep",
+        )
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
+    def custom_reset(self):
+        """Class specific component of reset command"""
+        if self.ticker:
+            return ["stocks", f"load {self.ticker}", "fa", "fmp"]
+        return []
 
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self.fmp_parser.parse_known_args(an_input.split())
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
-
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
-
-    @try_except
     def call_profile(self, other_args: List[str]):
         """Process profile command"""
         parser = argparse.ArgumentParser(
@@ -146,11 +96,9 @@ Ticker: {self.ticker}
             """,
         )
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        fmp_view.display_profile(self.ticker)
+        if ns_parser:
+            fmp_view.display_profile(self.ticker)
 
-    @try_except
     def call_quote(self, other_args: List[str]):
         """Process quote command"""
         parser = argparse.ArgumentParser(
@@ -167,11 +115,9 @@ Ticker: {self.ticker}
             """,
         )
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-        fmp_view.display_quote(self.ticker)
+        if ns_parser:
+            fmp_view.display_quote(self.ticker)
 
-    @try_except
     def call_enterprise(self, other_args: List[str]):
         """Process income command"""
         parser = argparse.ArgumentParser(
@@ -186,13 +132,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -205,17 +151,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            fmp_view.display_enterprise(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-        fmp_view.display_enterprise(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_dcf(self, other_args: List[str]):
         """Process dcf command"""
         parser = argparse.ArgumentParser(
@@ -229,13 +172,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -248,16 +191,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_discounted_cash_flow(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_discounted_cash_flow(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_income(self, other_args: List[str]):
         """Process income command"""
         parser = argparse.ArgumentParser(
@@ -267,7 +208,7 @@ Ticker: {self.ticker}
             description="""
                 Prints a complete income statement over time. This can be either quarterly or annually.
                 The following fields are expected: Accepted date, Cost and expenses, Cost of
-                revenue, Depreciation and amortization, Ebitda, Ebitdaratio, Eps, Epsdiluted, Filling
+                revenue, Depreciation and amortization, EBITDA, EBITDA Ratio, Eps, Eps Diluted, Filling
                 date, Final link, General and administrative expenses, Gross profit, Gross profit
                 ratio, Income before tax, Income before tax ratio, Income tax expense, Interest
                 expense, Link, Net income, Net income ratio, Operating expenses, Operating income,
@@ -277,13 +218,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -296,16 +237,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_income_statement(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_income_statement(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_balance(self, other_args: List[str]):
         """Process balance command"""
         parser = argparse.ArgumentParser(
@@ -330,13 +269,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -349,16 +288,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_balance_sheet(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_balance_sheet(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_cash(self, other_args: List[str]):
         """Process cash command"""
         parser = argparse.ArgumentParser(
@@ -381,13 +318,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -400,16 +337,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_cash_flow(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_cash_flow(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_metrics(self, other_args: List[str]):
         """Process metrics command"""
         parser = argparse.ArgumentParser(
@@ -429,7 +364,7 @@ Ticker: {self.ticker}
                 Graham number, Income quality, Intangibles to total assets, Interest debt per share,
                 Inventory turnover, Market cap, Net current asset value, Net debt to EBITDA, Net income
                 per share, Operating cash flow per share, Payables turnover, Payout ratio, Pb ratio, Pe
-                ratio, Pfcf ratio, Pocfratio, Price to sales ratio, Ptb ratio, Receivables turnover,
+                ratio, Pfcf ratio, Pocf ratio, Price to sales ratio, Ptb ratio, Receivables turnover,
                 Research and development to revenue, Return on tangible assets, Revenue per share,
                 Roe, Roic, Sales general and administrative to revenue, Shareholders equity per
                 share, Stock based compensation to revenue, Tangible book value per share, and Working
@@ -437,13 +372,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -456,16 +391,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_key_metrics(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_key_metrics(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_ratios(self, other_args: List[str]):
         """Process cash command"""
         parser = argparse.ArgumentParser(
@@ -494,13 +427,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -513,16 +446,14 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_financial_ratios(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
+        if ns_parser:
+            fmp_view.display_financial_ratios(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
+            )
 
-    @try_except
     def call_growth(self, other_args: List[str]):
         """Process cash command"""
         parser = argparse.ArgumentParser(
@@ -533,12 +464,12 @@ Ticker: {self.ticker}
             time. This can be either annually and quarterly. These are, among other things, Revenue
             Growth (3, 5 and 10 years), inventory growth and operating cash flow growth (3, 5 and 10
             years). The following fields are expected: Asset growth, Book valueper share growth, Debt
-            growth, Dividendsper share growth, Ebitgrowth, Epsdiluted growth, Epsgrowth, Five y
+            growth, Dividendsper share growth, Ebit growth, Eps diluted growth, Eps growth, Five y
             dividendper share growth per share, Five y net income growth per share, Five y operating c
             f growth per share, Five y revenue growth per share, Five y shareholders equity growth per
             share, Free cash flow growth, Gross profit growth, Inventory growth, Net income growth,
-            Operating cash flow growth, Operating income growth, Rdexpense growth, Receivables growth,
-            Revenue growth, Sgaexpenses growth, Ten y dividendper share growth per share, Ten y net
+            Operating cash flow growth, Operating income growth, Rd expense growth, Receivables growth,
+            Revenue growth, Sga expenses growth, Ten y dividendper share growth per share, Ten y net
             income growth per share, Ten y operating c f growth per share, Ten y revenue growth per
             share, Ten y shareholders equity growth per share, Three y dividendper share growth per
             share, Three y net income growth per share, Three y operating c f growth per share, Three y
@@ -547,13 +478,13 @@ Ticker: {self.ticker}
             """,
         )
         parser.add_argument(
-            "-n",
-            "--num",
+            "-l",
+            "--limit",
             action="store",
-            dest="n_num",
+            dest="limit",
             type=check_positive,
             default=1,
-            help="Number of latest years/quarters.",
+            help="Limit of latest years/quarters.",
         )
         parser.add_argument(
             "-q",
@@ -566,52 +497,10 @@ Ticker: {self.ticker}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        if not ns_parser:
-            return
-        fmp_view.display_financial_statement_growth(
-            ticker=self.ticker,
-            number=ns_parser.n_num,
-            quarterly=ns_parser.b_quarter,
-            export=ns_parser.export,
-        )
-
-
-def menu(ticker: str, start: str, interval: str):
-    """Financial Modeling Prep menu
-
-    Parameters
-    ----------
-    ticker : str
-        Fundamental analysis ticker symbol
-    start : str
-        Start date of the stock data
-    interval : str
-        Stock data interval
-    """
-
-    fmp_controller = FinancialModelingPrepController(ticker, start, interval)
-    fmp_controller.call_help(None)
-
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in fmp_controller.CHOICES}
+        if ns_parser:
+            fmp_view.display_financial_statement_growth(
+                ticker=self.ticker,
+                number=ns_parser.limit,
+                quarterly=ns_parser.b_quarter,
+                export=ns_parser.export,
             )
-
-            an_input = session.prompt(
-                f"{get_flair()} (stocks)>(fa)>(fmp)> ",
-                completer=completer,
-            )
-        else:
-            an_input = input(f"{get_flair()} (stocks)>(fa)>(fmp)> ")
-
-        try:
-            process_input = fmp_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue

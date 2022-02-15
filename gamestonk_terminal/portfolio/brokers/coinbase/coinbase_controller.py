@@ -3,102 +3,64 @@ __docformat__ = "numpy"
 
 # pylint: disable=R0904, C0302, W0622
 import argparse
+from typing import List
 from prompt_toolkit.completion import NestedCompleter
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.portfolio.brokers.coinbase import (
     coinbase_view,
 )
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
     parse_known_args_and_warn,
     check_positive,
-    try_except,
-    system_clear,
+    EXPORT_ONLY_RAW_DATA_ALLOWED,
 )
 
 
-class CoinbaseController:
+class CoinbaseController(BaseController):
+    """Coinbase Controller class"""
 
-    CHOICES = [
-        "?",
-        "cls",
-        "help",
-        "q",
-        "quit",
+    CHOICES_COMMANDS = ["account", "history", "orders", "deposits"]
+
+    order_sortby = [
+        "product_id",
+        "side",
+        "price",
+        "size",
+        "type",
+        "created_at",
+        "status",
     ]
+    deposit_sort = [
+        "created_at",
+        "amount",
+    ]
+    PATH = "/portfolio/bro/cb/"
 
-    CB_CHOICES = ["account", "history", "orders", "deposits"]
+    def __init__(self, queue: List[str] = None):
+        """Constructor"""
+        super().__init__(queue)
 
-    def __init__(self):
-        """CONSTRUCTOR"""
-
-        self._cb_parser = argparse.ArgumentParser(add_help=False, prog="cb")
-        self.CHOICES.extend(self.CB_CHOICES)
-
-        self._cb_parser.add_argument("cmd", choices=self.CHOICES)
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            choices["orders"]["-s"] = {c: None for c in self.order_sortby}
+            choices["orders"]["--sortby"] = {c: None for c in self.order_sortby}
+            choices["deposits"]["-s"] = {c: None for c in self.deposit_sort}
+            choices["deposits"]["--sortby"] = {c: None for c in self.deposit_sort}
+            self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
         """Print help"""
-        help_text = """
-Coinbase:
-    cls         clear screen
-    ?/help      show this menu again
-    q           quit this menu, and shows back to main menu
-    quit        quit to abandon the program
-
+        help_text = """[cmds]
     account     show balance of your account
     history     show history of your account
     deposits    show all your deposits or internal transfers
     orders      show all your orders
-"""
-        print(help_text)
+[/cmds]"""
+        console.print(text=help_text, menu="Portfolio - Brokers - Coinbase")
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
-
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self._cb_parser.parse_known_args(an_input.split())
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_q(self, _):
-        """Process Q command - quit the menu."""
-        return False
-
-    def call_quit(self, _):
-        """Process Quit command - quit the program."""
-        return True
-
-    @try_except
     def call_account(self, other_args):
         """Process account command"""
         parser = argparse.ArgumentParser(
@@ -122,29 +84,20 @@ Coinbase:
             dest="currency",
             help="Currency to display value in.",
         )
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
-        )
 
         if other_args and other_args[0][0] != "-":
             other_args.insert(0, "--acc")
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-
-        if not ns_parser:
-            return
-
-        coinbase_view.display_account(
-            currency=ns_parser.currency,
-            export=ns_parser.export,
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-    @try_except
+        if ns_parser:
+            coinbase_view.display_account(
+                currency=ns_parser.currency,
+                export=ns_parser.export,
+            )
+
     def call_history(self, other_args):
         """Process account command"""
         parser = argparse.ArgumentParser(
@@ -170,28 +123,19 @@ Coinbase:
             default=20,
             type=check_positive,
         )
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
-        )
 
         if other_args and other_args[0][0] != "-":
             other_args.insert(0, "--acc")
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-
-        if not ns_parser:
-            return
-
-        coinbase_view.display_history(
-            ns_parser.account, ns_parser.export, ns_parser.limit
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-    @try_except
+        if ns_parser:
+            coinbase_view.display_history(
+                ns_parser.account, ns_parser.export, ns_parser.limit
+            )
+
     def call_orders(self, other_args):
         """Process orders command"""
         parser = argparse.ArgumentParser(
@@ -215,15 +159,7 @@ Coinbase:
             type=str,
             help="Sort by given column. Default: created_at",
             default="created_at",
-            choices=[
-                "product_id",
-                "side",
-                "price",
-                "size",
-                "type",
-                "created_at",
-                "status",
-            ],
+            choices=self.order_sortby,
         )
         parser.add_argument(
             "--descend",
@@ -232,28 +168,18 @@ Coinbase:
             dest="descend",
             default=False,
         )
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
-        )
-
         if other_args and other_args[0][0] != "-":
             other_args.insert(0, "--acc")
 
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-
-        if not ns_parser:
-            return
-
-        coinbase_view.display_orders(
-            ns_parser.limit, ns_parser.sortby, ns_parser.descend, ns_parser.export
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-    @try_except
+        if ns_parser:
+            coinbase_view.display_orders(
+                ns_parser.limit, ns_parser.sortby, ns_parser.descend, ns_parser.export
+            )
+
     def call_deposits(self, other_args):
         """Process deposits command"""
         parser = argparse.ArgumentParser(
@@ -286,10 +212,7 @@ Coinbase:
             type=str,
             help="Sort by given column. Default: created_at",
             default="created_at",
-            choices=[
-                "created_at",
-                "amount",
-            ],
+            choices=self.deposit_sort,
         )
         parser.add_argument(
             "--descend",
@@ -298,51 +221,14 @@ Coinbase:
             dest="descend",
             default=False,
         )
-        parser.add_argument(
-            "--export",
-            choices=["csv", "json", "xlsx"],
-            default="",
-            type=str,
-            dest="export",
-            help="Export dataframe data to csv,json,xlsx file",
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        coinbase_view.display_deposits(
-            ns_parser.limit,
-            ns_parser.sortby,
-            ns_parser.type,
-            ns_parser.descend,
-            ns_parser.export,
-        )
-
-
-def menu():
-
-    cb_controller = CoinbaseController()
-    cb_controller.print_help()
-
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in cb_controller.CHOICES}
+        if ns_parser:
+            coinbase_view.display_deposits(
+                ns_parser.limit,
+                ns_parser.sortby,
+                ns_parser.type,
+                ns_parser.descend,
+                ns_parser.export,
             )
-            an_input = session.prompt(
-                f"{get_flair()} (bro)>(cb)> ",
-                completer=completer,
-            )
-        else:
-            an_input = input(f"{get_flair()} (bro)>(cb)> ")
-
-        try:
-            process_input = cb_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue

@@ -2,7 +2,7 @@
 __docformat__ = "numpy"
 
 import argparse
-from typing import List, Union
+from typing import List, Union, Optional
 import os
 from warnings import simplefilter
 from datetime import timedelta
@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 from pandas.plotting import register_matplotlib_converters
 import matplotlib.pyplot as plt
-from colorama import Fore, Style
 from sklearn.metrics import (
     mean_absolute_error,
     r2_score,
@@ -18,7 +17,6 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
-from tabulate import tabulate
 from tensorflow.keras.models import Sequential
 from gamestonk_terminal.helper_funcs import (
     check_positive,
@@ -26,10 +24,13 @@ from gamestonk_terminal.helper_funcs import (
     parse_known_args_and_warn,
     valid_date,
     plot_autoscale,
+    print_rich_table,
 )
 from gamestonk_terminal import config_neural_network_models as cfg
 from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
+from gamestonk_terminal.rich_config import console
 
 
 register_matplotlib_converters()
@@ -42,7 +43,7 @@ simplefilter(action="ignore", category=FutureWarning)
 ORIGINAL_TF_XLA_FLAGS = os.environ.get("TF_XLA_FLAGS")
 ORIGINAL_TF_FORCE_GPU_ALLOW_GROWTH = os.environ.get("TF_FORCE_GPU_ALLOW_GROWTH")
 
-PREPROCESSER = cfg.Preprocess
+PREPROCESSOR = cfg.Preprocess
 
 
 def check_valid_frac(num) -> float:
@@ -157,6 +158,7 @@ def parse_args(prog: str, description: str, other_args: List[str]):
         "default: usually the same as false, uses env/TensorFlow default",
     )
     parser.add_argument(
+        "-l",
         "--loops",
         action="store",
         dest="n_loops",
@@ -215,7 +217,7 @@ def parse_args(prog: str, description: str, other_args: List[str]):
         return ns_parser
 
     except SystemExit:
-        print("")
+        console.print("")
         return None
 
 
@@ -258,20 +260,20 @@ def prepare_scale_train_valid_test(
     dates_test: np.ndarray
         Array of dates after specified end date
     scaler:
-        Fitted preprocesser
+        Fitted PREPROCESSOR
     """
 
     # Pre-process data
-    if PREPROCESSER == "standardization":
+    if PREPROCESSOR == "standardization":
         scaler = StandardScaler()
 
-    elif PREPROCESSER == "minmax":
+    elif PREPROCESSOR == "minmax":
         scaler = MinMaxScaler()
 
-    elif PREPROCESSER == "normalization":
+    elif PREPROCESSOR == "normalization":
         scaler = Normalizer()
 
-    elif (PREPROCESSER == "none") or (PREPROCESSER is None):
+    elif (PREPROCESSOR == "none") or (PREPROCESSOR is None):
         scaler = None
     # Test data is used for forecasting.  Takes the last n_input_days data points.
     # These points are not fed into training
@@ -279,7 +281,9 @@ def prepare_scale_train_valid_test(
     if s_end_date:
         data = data[data.index <= s_end_date]
         if n_input_days + n_predict_days > data.shape[0]:
-            print("Cannot train enough input days to predict with loaded dataframe\n")
+            console.print(
+                "Cannot train enough input days to predict with loaded dataframe\n"
+            )
             return (
                 None,
                 None,
@@ -315,13 +319,17 @@ def prepare_scale_train_valid_test(
     next_n_day_dates = []
 
     for idx in range(len(prices) - n_input_days - n_predict_days):
-        input_prices.append(prices[idx : idx + n_input_days])
-        input_dates.append(dates[idx : idx + n_input_days])
+        input_prices.append(prices[idx : idx + n_input_days])  # noqa: E203
+        input_dates.append(dates[idx : idx + n_input_days])  # noqa: E203
         next_n_day_prices.append(
-            prices[idx + n_input_days : idx + n_input_days + n_predict_days]
+            prices[
+                idx + n_input_days : idx + n_input_days + n_predict_days  # noqa: E203
+            ]
         )
         next_n_day_dates.append(
-            dates[idx + n_input_days : idx + n_input_days + n_predict_days]
+            dates[
+                idx + n_input_days : idx + n_input_days + n_predict_days  # noqa: E203
+            ]
         )
 
     input_dates = np.asarray(input_dates)  # type: ignore
@@ -376,7 +384,7 @@ def forecast(
     model: Sequential
         Pretrained model
     scaler:
-        Fit scaler to be used to 'unscale' the data
+        Fit scaler to be used to 'un-scale' the data
 
     Returns
     -------
@@ -409,17 +417,31 @@ def plot_data_predictions(
     forecast_data,
     n_loops,
     time_str: str = "",
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Plots data predictions for the different ML techniques"""
+    """Plots data predictions for the different ML techniques
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
+    """
 
-    plt.figure(figsize=plot_autoscale(), dpi=PLOT_DPI)
-    plt.plot(
+    # This plot has 1 axis
+    if external_axes is None:
+        _, ax = plt.subplots(
+            figsize=plot_autoscale(),
+            dpi=PLOT_DPI,
+        )
+    else:
+        if len(external_axes) != 1:
+            console.print("[red]Expected list of 1 axis items./n[/red]")
+            return
+        (ax,) = external_axes
+
+    ax.plot(
         data.index,
         data.values,
-        "-ob",
-        lw=1,
+        "-o",
         ms=2,
-        label="Prices",
+        label="Real data",
     )
     for i in range(len(y_valid) - 1):
 
@@ -429,26 +451,25 @@ def plot_data_predictions(
         else:
             y_pred = preds[i].ravel()
             y_act = y_valid[i].ravel()
-        plt.plot(
+        ax.plot(
             y_dates_valid[i],
             y_pred,
-            "r",
-            lw=1,
+            color=theme.down_color,
         )
-        plt.fill_between(
+        ax.fill_between(
             y_dates_valid[i],
             y_pred,
             y_act,
             where=(y_pred < y_act),
-            color="r",
+            color=theme.down_color,
             alpha=0.2,
         )
-        plt.fill_between(
+        ax.fill_between(
             y_dates_valid[i],
             y_pred,
             y_act,
             where=(y_pred > y_act),
-            color="g",
+            color=theme.up_color,
             alpha=0.2,
         )
 
@@ -459,137 +480,123 @@ def plot_data_predictions(
     else:
         final_pred = preds[-1].reshape(-1, 1).ravel()
         final_valid = y_valid[-1].reshape(-1, 1).ravel()
-    plt.plot(
+    ax.plot(
         y_dates_valid[-1],
         final_pred,
-        "r",
-        lw=2,
+        color=theme.down_color,
         label="Predictions",
     )
-    plt.fill_between(
+    ax.fill_between(
         y_dates_valid[-1],
         final_pred,
         final_valid,
-        color="k",
         alpha=0.2,
     )
 
     _, _, ymin, ymax = plt.axis()
-    plt.vlines(
+    ax.vlines(
         forecast_data.index[0],
         ymin,
         ymax,
-        colors="k",
-        linewidth=3,
         linestyle="--",
-        color="k",
     )
     if n_loops == 1:
-        plt.plot(
+        ax.plot(
             forecast_data.index,
             forecast_data.values,
-            "-og",
-            ms=3,
+            "-o",
             label="Forecast",
         )
     else:
-        plt.plot(
+        ax.plot(
             forecast_data.index,
             forecast_data.median(axis=1).values,
-            "-og",
-            ms=3,
+            "-o",
             label="Forecast",
         )
-        plt.fill_between(
+        ax.fill_between(
             forecast_data.index,
             forecast_data.quantile(0.25, axis=1).values,
             forecast_data.quantile(0.75, axis=1).values,
-            color="c",
             alpha=0.3,
         )
     # Subtracting 1 day only works nicely for daily data.  For now if not daily, then start line on last point
     if not time_str or time_str == "1D":
-        plt.axvspan(
+        ax.axvspan(
             forecast_data.index[0] - timedelta(days=1),
             forecast_data.index[-1],
-            facecolor="tab:orange",
             alpha=0.2,
         )
-        plt.xlim(data.index[0], forecast_data.index[-1] + timedelta(days=1))
+        ax.set_xlim(data.index[0], forecast_data.index[-1] + timedelta(days=1))
 
     else:
-        plt.axvspan(
+        ax.axvspan(
             forecast_data.index[0],
             forecast_data.index[-1],
-            facecolor="tab:orange",
             alpha=0.2,
         )
-        plt.xlim(data.index[0], forecast_data.index[-1])
+        ax.set_xlim(data.index[0], forecast_data.index[-1])
+    ax.set_title(title)
+    ax.legend()
+    ax.set_ylabel("Value")
 
-    plt.legend(loc=0)
-    plt.xlabel("Time")
-    plt.ylabel("Value")
-    plt.grid(b=True, which="major", color="#666666", linestyle="-")
-    plt.title(title)
-    if gtff.USE_ION:
-        plt.ion()
-    plt.show()
+    theme.style_primary_axis(ax)
+
+    if external_axes is None:
+        theme.visualize_output()
 
 
 def price_prediction_color(val: float, last_val: float) -> str:
     """Set prediction to be a colored string"""
     if float(val) > last_val:
-        color = Fore.GREEN
-    else:
-        color = Fore.RED
-    return f"{color}{val:.2f} ${Style.RESET_ALL}"
+        return f"[green]{val:.2f} $[/green]"
+    return f"[red]{val:.2f} $[/red]"
 
 
 def print_pretty_prediction(df_pred: pd.DataFrame, last_price: float):
     """Print predictions"""
-    print("")
+    console.print("")
     if gtff.USE_COLOR:
-        print(f"Actual price: {Fore.YELLOW}{last_price:.2f} ${Style.RESET_ALL}\n")
-        if gtff.USE_TABULATE_DF:
-            df_pred = pd.DataFrame(df_pred)
-            df_pred.columns = ["pred"]
-            df_pred["pred"] = df_pred["pred"].apply(
-                lambda x: price_prediction_color(x, last_val=last_price)
-            )
-            print("Prediction:")
-            print(tabulate(df_pred, headers=["Prediction"], tablefmt="fancy_grid"))
+        df_pred = pd.DataFrame(df_pred)
+        df_pred.columns = ["pred"]
+        df_pred["pred"] = df_pred["pred"].apply(
+            lambda x: price_prediction_color(x, last_val=last_price)
+        )
+        print_rich_table(
+            df_pred,
+            show_index=True,
+            index_name="Datetime",
+            headers=["Prediction"],
+            floatfmt=".2f",
+            title=f"Actual price: [yellow]{last_price:.2f} $[/yellow]\n",
+        )
 
-        else:
-
-            print("Prediction:")
-            print(
-                df_pred.apply(price_prediction_color, last_val=last_price).to_string()
-            )
     else:
-        if gtff.USE_TABULATE_DF:
-            df_pred = pd.DataFrame(df_pred)
-            df_pred.columns = ["pred"]
-            print("Prediction:")
-            print(tabulate(df_pred, headers=["Prediction"], tablefmt="fancy_grid"))
-        else:
-            print(f"Actual price: {last_price:.2f} $\n")
-            print("Prediction:")
-            print(df_pred.to_string())
+        df_pred = pd.DataFrame(df_pred)
+        df_pred.columns = ["pred"]
+        print_rich_table(
+            df_pred,
+            show_index=True,
+            title=f"Actual price: [yellow]{last_price:.2f} $[/yellow]\n",
+            index_name="Datetime",
+            headers=["Prediction"],
+            floatfmt=".2f",
+        )
 
 
 def print_pretty_prediction_nn(df_pred: pd.DataFrame, last_price: float):
     if gtff.USE_COLOR:
-        print(f"Actual price: {Fore.YELLOW}{last_price:.2f} ${Style.RESET_ALL}\n")
-        print("Prediction:")
-        print(
+        console.print(f"Actual price: [yellow]{last_price:.2f} $[/yellow]\n")
+        console.print("Prediction:")
+        console.print(
             df_pred.applymap(
                 lambda x: price_prediction_color(x, last_val=last_price)
             ).to_string()
         )
     else:
-        print(f"Actual price: {last_price:.2f} $\n")
-        print("Prediction:")
-        print(df_pred.to_string())
+        console.print(f"Actual price: {last_price:.2f} $\n")
+        console.print("Prediction:")
+        console.print(df_pred.to_string())
 
 
 def mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> np.number:
@@ -608,19 +615,22 @@ def print_prediction_kpis(real: np.ndarray, pred: np.ndarray):
         "RMSE": f"{mean_squared_error(real, pred, squared=False):.3f}",
     }
 
-    print("KPIs")
     df = pd.DataFrame.from_dict(kpis, orient="index")
-    if gtff.USE_TABULATE_DF:
-        print(tabulate(df, tablefmt="fancy_grid", showindex=True))
-    else:
-        print(df.to_string())
+    print_rich_table(
+        df,
+        show_index=True,
+        title="KPIs",
+        floatfmt=".2f",
+    )
 
 
 def price_prediction_backtesting_color(val: list) -> str:
     """Add color to backtest data"""
     err_pct = 100 * (val[0] - val[1]) / val[1]
     if val[0] > val[1]:
-        s_err_pct = f"       {Fore.GREEN} +{err_pct:.2f} %"
+        s_err_pct = f"       [green] +{err_pct:.2f} %"
+        color = "[/green]"
     else:
-        s_err_pct = f"       {Fore.RED} {err_pct:.2f} %"
-    return f"{val[1]:.2f}    x    {Fore.YELLOW}{val[0]:.2f}{s_err_pct}{Style.RESET_ALL}"
+        s_err_pct = f"       [red] {err_pct:.2f} %"
+        color = "[/red]"
+    return f"{val[1]:.2f}    x    [yellow]{val[0]:.2f}[/yellow]{s_err_pct}{color}"

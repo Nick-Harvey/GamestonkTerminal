@@ -1,14 +1,22 @@
 """CoinPaprika model"""
 __docformat__ = "numpy"
 
-from typing import Tuple, Optional, Any
-from datetime import datetime, timedelta
+import logging
 import textwrap
+from datetime import datetime, timedelta
+from typing import Any, Optional, Tuple
+
 import pandas as pd
 from dateutil import parser
+
 from gamestonk_terminal.cryptocurrency.coinpaprika_helpers import PaprikaSession
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_coin(coin_id: str = "eth-ethereum") -> dict:
     """Get coin by id [Source: CoinPaprika]
 
@@ -27,6 +35,7 @@ def get_coin(coin_id: str = "eth-ethereum") -> dict:
     return coin
 
 
+@log_start_end(log=logger)
 def get_coin_twitter_timeline(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     """Get twitter timeline for given coin id. Not more than last 50 tweets [Source: CoinPaprika]
 
@@ -44,7 +53,7 @@ def get_coin_twitter_timeline(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     session = PaprikaSession()
     res = session.make_request(session.ENDPOINTS["coin_tweeter"].format(coin_id))
     if "error" in res:
-        print(res)
+        console.print(res)
         return pd.DataFrame()
     if isinstance(res, list) and len(res) == 0:
         return pd.DataFrame()
@@ -61,6 +70,7 @@ def get_coin_twitter_timeline(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_coin_events_by_id(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     """Get all events related to given coin like conferences, start date of futures trading etc. [Source: CoinPaprika]
 
@@ -94,7 +104,7 @@ def get_coin_events_by_id(coin_id: str = "eth-ethereum") -> pd.DataFrame:
 
     session = PaprikaSession()
     res = session.make_request(session.ENDPOINTS["coin_events"].format(coin_id))
-    if not res:
+    if not res or "error" in res:
         return pd.DataFrame()
     data = pd.DataFrame(res)
     data["description"] = data["description"].apply(
@@ -111,6 +121,7 @@ def get_coin_events_by_id(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     return data
 
 
+@log_start_end(log=logger)
 def get_coin_exchanges_by_id(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     """Get all exchanges for given coin id. [Source: CoinPaprika]
 
@@ -133,6 +144,7 @@ def get_coin_exchanges_by_id(coin_id: str = "eth-ethereum") -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_coin_markets_by_id(
     coin_id: str = "eth-ethereum", quotes: str = "USD"
 ) -> pd.DataFrame:
@@ -160,7 +172,7 @@ def get_coin_markets_by_id(
         session.ENDPOINTS["coin_markets"].format(coin_id), quotes=quotes
     )
     if "error" in markets:
-        print(markets)
+        console.print(markets)
         return pd.DataFrame()
 
     data = []
@@ -181,6 +193,7 @@ def get_coin_markets_by_id(
     return pd.DataFrame(data)
 
 
+@log_start_end(log=logger)
 def get_ohlc_historical(
     coin_id: str = "eth-ethereum", quotes: str = "USD", days: int = 90
 ) -> pd.DataFrame:
@@ -222,11 +235,12 @@ def get_ohlc_historical(
         end=end,
     )
     if "error" in data:
-        print(data)
+        console.print(data)
         return pd.DataFrame()
     return pd.DataFrame(data)
 
 
+@log_start_end(log=logger)
 def get_tickers_info_for_coin(
     coin_id: str = "btc-bitcoin", quotes: str = "USD"
 ) -> pd.DataFrame:
@@ -292,26 +306,27 @@ def get_tickers_info_for_coin(
             try:
                 tickers[key] = parser.parse(date).strftime("%Y-%m-%d %H:%M:%S")
             except (KeyError, ValueError, TypeError) as e:
-                print(e)
+                console.print(e)
         if key == "quotes":
             try:
                 tickers[key][quotes]["ath_date"] = parser.parse(
                     tickers[key][quotes]["ath_date"]
                 ).strftime("%Y-%m-%d %H:%M:%S")
             except (KeyError, ValueError, TypeError) as e:
-                print(e)
+                console.print(e)
 
     df = pd.json_normalize(tickers)
     try:
         df.columns = [col.replace("quotes.", "") for col in list(df.columns)]
         df.columns = [col.replace(".", "_").lower() for col in list(df.columns)]
     except KeyError as e:
-        print(e)
+        console.print(e)
     df = df.T.reset_index()
     df.columns = ["Metric", "Value"]
     return df
 
 
+@log_start_end(log=logger)
 def validate_coin(coin: str, coins_dct: dict) -> Tuple[str, Optional[Any]]:
     """Helper method that validates if proper coin id or symbol was provided [Source: CoinPaprika]
 
@@ -340,11 +355,12 @@ def validate_coin(coin: str, coins_dct: dict) -> Tuple[str, Optional[Any]]:
 
     if not coin_found:
         raise ValueError(f"Could not find coin with given id: {coin}\n")
-    print(f"Coin found : {coin_found} with symbol {symbol}\n")
+    # console.print(f"Coin found : {coin_found} with symbol {symbol}\n")
     return coin_found, symbol
 
 
-def basic_coin_info(coin_id: str) -> pd.DataFrame:
+@log_start_end(log=logger)
+def basic_coin_info(coin_id: str = "btc-bitcoin") -> pd.DataFrame:
     """Basic coin information [Source: CoinPaprika]
 
     Parameters

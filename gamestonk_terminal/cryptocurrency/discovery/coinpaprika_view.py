@@ -1,15 +1,25 @@
 """CoinPaprika view"""
 __docformat__ = "numpy"
 
+import logging
 import os
-from tabulate import tabulate
-from gamestonk_terminal.helper_funcs import export_data
+
 import gamestonk_terminal.cryptocurrency.discovery.coinpaprika_model as paprika
-from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_search_results(
-    query: str, category: str, top: int, sortby: str, descend: bool, export: str
+    query: str,
+    category: str,
+    top: int = 10,
+    sortby: str = "id",
+    descend: bool = False,
+    export: str = "",
 ) -> None:
     """Search over CoinPaprika. [Source: CoinPaprika]
 
@@ -35,24 +45,20 @@ def display_search_results(
     df = paprika.get_search_results(query=query, category=category)
 
     if df.empty:
-        print(f"No results for search query '{query}' in category '{category}'\n")
+        console.print(
+            f"No results for search query '{query}' in category '{category}'\n"
+        )
         return
 
     df = df.sort_values(by=sortby, ascending=descend)
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df.head(top),
-                headers=df.columns,
-                floatfmt=".1f",
-                showindex=False,
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(df.to_string, "\n")
+    print_rich_table(
+        df.head(top),
+        headers=list(df.columns),
+        show_index=False,
+        title="CoinPaprika Results",
+    )
+    console.print("")
 
     export_data(
         export,

@@ -2,20 +2,30 @@
 __docformat__ = "numpy"
 # pylint:disable=too-many-arguments,too-many-lines
 
+import logging
 import os
 from collections import OrderedDict
-from typing import Dict
+from typing import Dict, Optional, List
+
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from tabulate import tabulate
 
-from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
-from gamestonk_terminal.helper_funcs import plot_autoscale, export_data
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import (
+    export_data,
+    plot_autoscale,
+    print_rich_table,
+)
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.sector_industry_analysis import financedatabase_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def display_bars_financials(
     finance_key: str,
     finance_metric: str,
@@ -28,6 +38,7 @@ def display_bars_financials(
     export: str = "",
     raw: bool = False,
     already_loaded_stocks_data: Dict = None,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display financials bars comparing sectors, industry, analysis, countries, market cap and excluding exchanges.
 
@@ -55,6 +66,8 @@ def display_bars_financials(
         Output all raw data
     already_loaded_stocks_data: Dict
         Dictionary of filtered stocks data that has been loaded before
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
 
     Returns
     -------
@@ -113,7 +126,7 @@ def display_bars_financials(
         )
 
         if len(df_all) > limit:
-            print(f"Limiting the amount of companies displayed to {limit}.")
+            console.print(f"Limiting the amount of companies displayed to {limit}.")
 
         company_name = np.array(company_names)[:limit]
         company_metric = np.array(company_metrics)[:limit]
@@ -122,24 +135,20 @@ def display_bars_financials(
         df = df_all.head(limit)
 
         if raw:
-            print("")
-            if gtff.USE_TABULATE_DF:
-                print(
-                    tabulate(
-                        df,
-                        headers=df.columns,
-                        floatfmt=".2f",
-                        showindex=False,
-                        tablefmt="fancy_grid",
-                    ),
-                )
-            else:
-                print(df.to_string, "\n")
+            print_rich_table(
+                df, headers=list(df.columns), show_index=False, title="Bars Financials"
+            )
         else:
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    # set returns statement to be compatible with others
+                    return dict(), list()
+                (ax,) = external_axes
 
             magnitude = 0
             while max(company_metric) > 1_000 or abs(min(company_metric)) > 1_000:
@@ -158,15 +167,16 @@ def display_bars_financials(
             else:
                 unit = " KMBTP"[magnitude]
 
+            colors = iter(theme.get_colors())
             for name, metric, ticker in zip(
                 company_name[::-1], company_metric[::-1], company_ticker[::-1]
             ):
                 if len(name.split(" ")) > 6 and len(name) > 40:
                     name = f'{" ".join(name.split(" ")[:4])}\n{" ".join(name.split(" ")[4:])}'
-                plt.barh(name, metric, label=ticker)
+                ax.barh(name, metric, label=ticker, color=next(colors))
 
             handles, _ = plt.gca().get_legend_handles_labels()
-            plt.legend(
+            ax.legend(
                 reversed(handles), reversed(company_ticker[::-1]), loc="lower right"
             )
 
@@ -180,7 +190,7 @@ def display_bars_financials(
             )
 
             benchmark = np.median(company_metric)
-            plt.axvline(x=benchmark, lw=3, ls="--", c="k")
+            ax.axvline(x=benchmark, lw=3, ls="--", c="grey")
 
             if unit != " ":
                 units = f" [{unit}] "
@@ -199,14 +209,17 @@ def display_bars_financials(
                 title += " " if (industry or sector) else "\n"
 
             title += (
-                "(excluding data from international exchanges)"
+                "(excl. data from international exchanges)"
                 if exclude_exchanges
-                else "(including data from international exchanges)"
+                else "(incl. data from international exchanges)"
             )
 
-            plt.title(title)
-            plt.tight_layout()
-            plt.show()
+            ax.set_title(title)
+
+            theme.style_primary_axis(ax)
+
+            if not external_axes:
+                theme.visualize_output()
 
         export_data(
             export,
@@ -215,21 +228,19 @@ def display_bars_financials(
             df_all,
         )
 
-        if not export:
-            print("")
-
-        return stocks_data, company_ticker
+        return stocks_data, company_tickers
 
     if len(metric_data) == 1:
-        print(
+        console.print(
             f"Only 1 company found '{list(metric_data.keys())[0]}'. No barchart will be depicted.\n"
         )
         return stocks_data, [list(metric_data.values())[0][1]]
 
-    print("No company found. No barchart will be depicted.\n")
+    console.print("No company found. No barchart will be depicted.\n")
     return dict(), list()
 
 
+@log_start_end(log=logger)
 def display_companies_per_sector_in_country(
     country: str,
     mktcap: str = "",
@@ -238,6 +249,7 @@ def display_companies_per_sector_in_country(
     raw: bool = False,
     max_sectors_to_display: int = 15,
     min_pct_to_display_sector: float = 0.015,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display number of companies per sector in a specific country (and market cap). [Source: Finance Database]
 
@@ -257,6 +269,8 @@ def display_companies_per_sector_in_country(
         Maximum number of sectors to display
     min_pct_to_display_sector: float
         Minimum percentage to display sector
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
     """
     companies_per_sector = financedatabase_model.get_companies_per_sector_in_country(
         country, mktcap, exclude_exchanges
@@ -273,7 +287,7 @@ def display_companies_per_sector_in_country(
             del companies_per_sector[key]
 
     if not companies_per_sector:
-        print("No companies found with these parameters!\n")
+        console.print("No companies found with these parameters!\n")
         return
 
     df = pd.DataFrame.from_dict(companies_per_sector, orient="index")
@@ -282,40 +296,13 @@ def display_companies_per_sector_in_country(
     df["Number of companies"] = df["Number of companies"].astype(int)
 
     title = mktcap + " cap companies " if mktcap else "Companies "
-    title += f"per sector in {country}"
-    title += " excluding exchanges" if exclude_exchanges else " including exchanges"
+    title += f"in {country}\n"
+    title += "excl. exchanges" if exclude_exchanges else " incl. exchanges"
 
     if raw:
-        print(f"\n{title}")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    df,
-                    headers=df.columns,
-                    showindex=True,
-                    tablefmt="fancy_grid",
-                ),
-            )
-        else:
-            print(df.to_string, "\n")
+        print_rich_table(df, headers=list(df.columns), show_index=True, title=title)
     else:
-        colors = [
-            "b",
-            "g",
-            "r",
-            "c",
-            "m",
-            "y",
-            "k",
-            "tab:blue",
-            "tab:orange",
-            "tab:gray",
-            "lightcoral",
-            "yellow",
-            "saddlebrown",
-            "lightblue",
-            "olive",
-        ]
+        colors = theme.get_colors()
 
         if len(companies_per_sector) > 1:
             total_num_companies = sum(companies_per_sector.values())
@@ -336,7 +323,7 @@ def display_companies_per_sector_in_country(
                         max_sectors_to_display = num_sectors_to_display
 
             else:
-                print(
+                console.print(
                     "The minimum threshold percentage specified is too high, thus it will be ignored."
                 )
 
@@ -355,29 +342,35 @@ def display_companies_per_sector_in_country(
             else:
                 legend, values = zip(*companies_per_sector.items())
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    return
+                (ax,) = external_axes
+
             plt.pie(
                 values,
                 labels=legend,
                 colors=colors,
                 wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
                 labeldistance=1.05,
-                startangle=90,
+                startangle=45,
             )
-            plt.title(title)
-            plt.tight_layout()
+            ax.set_title(title, fontsize=14)
 
-            plt.show()
+            if not external_axes:
+                theme.visualize_output()
 
         elif len(companies_per_sector) == 1:
-            print(
+            console.print(
                 f"Only 1 sector found '{list(companies_per_sector.keys())[0]}'. No pie chart will be depicted."
             )
         else:
-            print("No sector found. No pie chart will be depicted.")
-    print("")
+            console.print("No sector found. No pie chart will be depicted.")
+    console.print("")
 
     export_data(
         export,
@@ -387,6 +380,7 @@ def display_companies_per_sector_in_country(
     )
 
 
+@log_start_end(log=logger)
 def display_companies_per_industry_in_country(
     country: str,
     mktcap: str = "",
@@ -395,6 +389,7 @@ def display_companies_per_industry_in_country(
     raw: bool = False,
     max_industries_to_display: int = 15,
     min_pct_to_display_industry: float = 0.015,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display number of companies per industry in a specific country. [Source: Finance Database]
 
@@ -414,6 +409,9 @@ def display_companies_per_industry_in_country(
         Maximum number of industries to display
     min_pct_to_display_industry: float
         Minimum percentage to display industry
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
+
     """
     companies_per_industry = (
         financedatabase_model.get_companies_per_industry_in_country(
@@ -432,7 +430,7 @@ def display_companies_per_industry_in_country(
             del companies_per_industry[key]
 
     if not companies_per_industry:
-        print("No companies found with these parameters!\n")
+        console.print("No companies found with these parameters!\n")
         return
 
     df = pd.DataFrame.from_dict(companies_per_industry, orient="index")
@@ -441,40 +439,13 @@ def display_companies_per_industry_in_country(
     df["Number of companies"] = df["Number of companies"].astype(int)
 
     title = mktcap + " cap companies " if mktcap else "Companies "
-    title += f"per industry in {country}"
-    title += " excluding exchanges" if exclude_exchanges else " including exchanges"
+    title += f"in {country}\n"
+    title += "excl. exchanges" if exclude_exchanges else " incl. exchanges"
 
     if raw:
-        print(f"\n{title}")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    df,
-                    headers=df.columns,
-                    showindex=True,
-                    tablefmt="fancy_grid",
-                ),
-            )
-        else:
-            print(df.to_string, "\n")
+        print_rich_table(df, headers=list(df.columns), show_index=True, title=title)
     else:
-        colors = [
-            "b",
-            "g",
-            "r",
-            "c",
-            "m",
-            "y",
-            "k",
-            "tab:blue",
-            "tab:orange",
-            "tab:gray",
-            "lightcoral",
-            "yellow",
-            "saddlebrown",
-            "lightblue",
-            "olive",
-        ]
+        colors = theme.get_colors()
 
         if len(companies_per_industry) > 1:
             total_num_companies = sum(companies_per_industry.values())
@@ -497,7 +468,7 @@ def display_companies_per_industry_in_country(
                         max_industries_to_display = num_industries_to_display
 
             else:
-                print(
+                console.print(
                     "The minimum threshold percentage specified is too high, thus it will be ignored."
                 )
 
@@ -521,29 +492,36 @@ def display_companies_per_industry_in_country(
             else:
                 legend, values = zip(*companies_per_industry.items())
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
-            plt.pie(
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    return
+                (ax,) = external_axes
+
+            ax.pie(
                 values,
                 labels=legend,
                 colors=colors,
                 wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
                 labeldistance=1.05,
-                startangle=90,
+                startangle=45,
             )
-            plt.title(title)
-            plt.tight_layout()
 
-            plt.show()
+            ax.set_title(title, fontsize=14)
+
+            if not external_axes:
+                theme.visualize_output()
 
         elif len(companies_per_industry) == 1:
-            print(
+            console.print(
                 f"Only 1 industry found '{list(companies_per_industry.keys())[0]}'. No pie chart will be depicted."
             )
         else:
-            print("No industry found. No pie chart will be depicted.")
-    print("")
+            console.print("No industry found. No pie chart will be depicted.")
+    console.print("")
 
     export_data(
         export,
@@ -553,6 +531,7 @@ def display_companies_per_industry_in_country(
     )
 
 
+@log_start_end(log=logger)
 def display_companies_per_industry_in_sector(
     sector: str,
     mktcap: str = "",
@@ -561,6 +540,7 @@ def display_companies_per_industry_in_sector(
     raw: bool = False,
     max_industries_to_display: int = 15,
     min_pct_to_display_industry: float = 0.015,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display number of companies per industry in a specific sector. [Source: Finance Database]
 
@@ -580,6 +560,8 @@ def display_companies_per_industry_in_sector(
         Maximum number of industries to display
     min_pct_to_display_industry: float
         Minimum percentage to display industry
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
     """
     companies_per_industry = financedatabase_model.get_companies_per_industry_in_sector(
         sector, mktcap, exclude_exchanges
@@ -596,7 +578,7 @@ def display_companies_per_industry_in_sector(
             del companies_per_industry[key]
 
     if not companies_per_industry:
-        print("No companies found with these parameters!\n")
+        console.print("No companies found with these parameters!\n")
         return
 
     df = pd.DataFrame.from_dict(companies_per_industry, orient="index")
@@ -605,40 +587,18 @@ def display_companies_per_industry_in_sector(
     df["Number of companies"] = df["Number of companies"].astype(int)
 
     title = mktcap + " cap companies " if mktcap else "Companies "
-    title += f"per industry in {sector} sector"
-    title += " excluding exchanges" if exclude_exchanges else " including exchanges"
+    title += f"in {sector} sector\n"
+    title += "excl. exchanges" if exclude_exchanges else " incl. exchanges"
 
     if raw:
-        print(f"\n{title}")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    df,
-                    headers=df.columns,
-                    showindex=True,
-                    tablefmt="fancy_grid",
-                ),
-            )
-        else:
-            print(df.to_string, "\n")
+        print_rich_table(
+            df,
+            headers=list(df.columns),
+            show_index=True,
+            title=title,
+        )
     else:
-        colors = [
-            "b",
-            "g",
-            "r",
-            "c",
-            "m",
-            "y",
-            "k",
-            "tab:blue",
-            "tab:orange",
-            "tab:gray",
-            "lightcoral",
-            "yellow",
-            "saddlebrown",
-            "lightblue",
-            "olive",
-        ]
+        colors = theme.get_colors()
 
         if len(companies_per_industry) > 1:
             total_num_companies = sum(companies_per_industry.values())
@@ -661,7 +621,7 @@ def display_companies_per_industry_in_sector(
                         max_industries_to_display = num_industries_to_display
 
             else:
-                print(
+                console.print(
                     "The minimum threshold percentage specified is too high, thus it will be ignored."
                 )
 
@@ -685,29 +645,35 @@ def display_companies_per_industry_in_sector(
             else:
                 legend, values = zip(*companies_per_industry.items())
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
-            plt.pie(
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    return
+                (ax,) = external_axes
+
+            ax.pie(
                 values,
                 labels=legend,
                 colors=colors,
                 wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
                 labeldistance=1.05,
-                startangle=90,
+                startangle=45,
             )
-            plt.title(title)
-            plt.tight_layout()
+            ax.set_title(title, fontsize=14)
 
-            plt.show()
+            if not external_axes:
+                theme.visualize_output()
 
         elif len(companies_per_industry) == 1:
-            print(
+            console.print(
                 f"Only 1 industry found '{list(companies_per_industry.keys())[0]}'. No pie chart will be depicted."
             )
         else:
-            print("No industry found. No pie chart will be depicted.")
-    print("")
+            console.print("No industry found. No pie chart will be depicted.")
+    console.print("")
 
     export_data(
         export,
@@ -717,6 +683,7 @@ def display_companies_per_industry_in_sector(
     )
 
 
+@log_start_end(log=logger)
 def display_companies_per_country_in_sector(
     sector: str,
     mktcap: str = "",
@@ -725,6 +692,7 @@ def display_companies_per_country_in_sector(
     raw: bool = False,
     max_countries_to_display: int = 15,
     min_pct_to_display_country: float = 0.015,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display number of companies per country in a specific sector. [Source: Finance Database]
 
@@ -744,6 +712,8 @@ def display_companies_per_country_in_sector(
         Maximum number of countries to display
     min_pct_to_display_country: float
         Minimum percentage to display country
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
     """
     companies_per_country = financedatabase_model.get_companies_per_country_in_sector(
         sector, mktcap, exclude_exchanges
@@ -760,7 +730,7 @@ def display_companies_per_country_in_sector(
             del companies_per_country[key]
 
     if not companies_per_country:
-        print("No companies found with these parameters!\n")
+        console.print("No companies found with these parameters!\n")
         return
 
     df = pd.DataFrame.from_dict(companies_per_country, orient="index")
@@ -769,40 +739,13 @@ def display_companies_per_country_in_sector(
     df["Number of companies"] = df["Number of companies"].astype(int)
 
     title = mktcap + " cap companies " if mktcap else "Companies "
-    title += f"per country in {sector} sector"
-    title += " excluding exchanges" if exclude_exchanges else " including exchanges"
+    title += f"in {sector} sector\n"
+    title += "excl. exchanges" if exclude_exchanges else " incl. exchanges"
 
     if raw:
-        print(f"\n{title}")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    df,
-                    headers=df.columns,
-                    showindex=True,
-                    tablefmt="fancy_grid",
-                ),
-            )
-        else:
-            print(df.to_string, "\n")
+        print_rich_table(df, headers=list(df.columns), show_index=True, title=title)
     else:
-        colors = [
-            "b",
-            "g",
-            "r",
-            "c",
-            "m",
-            "y",
-            "k",
-            "tab:blue",
-            "tab:orange",
-            "tab:gray",
-            "lightcoral",
-            "yellow",
-            "saddlebrown",
-            "lightblue",
-            "olive",
-        ]
+        colors = theme.get_colors()
 
         if len(companies_per_country) > 1:
             total_num_companies = sum(companies_per_country.values())
@@ -825,7 +768,7 @@ def display_companies_per_country_in_sector(
                         max_countries_to_display = num_countries_to_display
 
             else:
-                print(
+                console.print(
                     "The minimum threshold percentage specified is too high, thus it will be ignored."
                 )
 
@@ -847,29 +790,35 @@ def display_companies_per_country_in_sector(
             else:
                 legend, values = zip(*companies_per_country.items())
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
-            plt.pie(
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    return
+                (ax,) = external_axes
+
+            ax.pie(
                 values,
                 labels=legend,
                 colors=colors,
                 wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
                 labeldistance=1.05,
-                startangle=90,
+                startangle=45,
             )
-            plt.title(title)
-            plt.tight_layout()
+            ax.set_title(title, fontsize=14)
 
-            plt.show()
+            if not external_axes:
+                theme.visualize_output()
 
         elif len(companies_per_country) == 1:
-            print(
+            console.print(
                 f"Only 1 country found '{list(companies_per_country.keys())[0]}'. No pie chart will be depicted."
             )
         else:
-            print("No country found. No pie chart will be depicted.")
-    print("")
+            console.print("No country found. No pie chart will be depicted.")
+    console.print("")
 
     export_data(
         export,
@@ -879,6 +828,7 @@ def display_companies_per_country_in_sector(
     )
 
 
+@log_start_end(log=logger)
 def display_companies_per_country_in_industry(
     industry: str,
     mktcap: str = "",
@@ -887,6 +837,7 @@ def display_companies_per_country_in_industry(
     raw: bool = False,
     max_countries_to_display: int = 15,
     min_pct_to_display_country: float = 0.015,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display number of companies per country in a specific industry. [Source: Finance Database]
 
@@ -906,6 +857,8 @@ def display_companies_per_country_in_industry(
         Maximum number of countries to display
     min_pct_to_display_country: float
         Minimum percentage to display country
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
     """
     companies_per_country = financedatabase_model.get_companies_per_country_in_industry(
         industry, mktcap, exclude_exchanges
@@ -922,7 +875,7 @@ def display_companies_per_country_in_industry(
             del companies_per_country[key]
 
     if not companies_per_country:
-        print("No companies found with these parameters!\n")
+        console.print("No companies found with these parameters!\n")
         return
 
     df = pd.DataFrame.from_dict(companies_per_country, orient="index")
@@ -931,40 +884,13 @@ def display_companies_per_country_in_industry(
     df["Number of companies"] = df["Number of companies"].astype(int)
 
     title = mktcap + " cap companies " if mktcap else "Companies "
-    title += f"per country in {industry} industry"
-    title += " excluding exchanges" if exclude_exchanges else " including exchanges"
+    title += f"per country in {industry} industry\n"
+    title += "excl. exchanges" if exclude_exchanges else " incl. exchanges"
 
     if raw:
-        print(f"\n{title}")
-        if gtff.USE_TABULATE_DF:
-            print(
-                tabulate(
-                    df,
-                    headers=df.columns,
-                    showindex=True,
-                    tablefmt="fancy_grid",
-                ),
-            )
-        else:
-            print(df.to_string, "\n")
+        print_rich_table(df, headers=list(df.columns), show_index=True, title=title)
     else:
-        colors = [
-            "b",
-            "g",
-            "r",
-            "c",
-            "m",
-            "y",
-            "k",
-            "tab:blue",
-            "tab:orange",
-            "tab:gray",
-            "lightcoral",
-            "yellow",
-            "saddlebrown",
-            "lightblue",
-            "olive",
-        ]
+        colors = theme.get_colors()
 
         if len(companies_per_country) > 1:
             total_num_companies = sum(companies_per_country.values())
@@ -987,7 +913,7 @@ def display_companies_per_country_in_industry(
                         max_countries_to_display = num_countries_to_display
 
             else:
-                print(
+                console.print(
                     "The minimum threshold percentage specified is too high, thus it will be ignored."
                 )
 
@@ -1009,29 +935,35 @@ def display_companies_per_country_in_industry(
             else:
                 legend, values = zip(*companies_per_country.items())
 
-            plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            if gtff.USE_ION:
-                plt.ion()
-            plt.pie(
+            # This plot has 1 axis
+            if not external_axes:
+                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            else:
+                if len(external_axes) != 1:
+                    console.print("[red]Expected list of one axis item./n[/red]")
+                    return
+                (ax,) = external_axes
+
+            ax.pie(
                 values,
                 labels=legend,
                 colors=colors,
                 wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
                 labeldistance=1.05,
-                startangle=90,
+                startangle=45,
             )
-            plt.title(title)
-            plt.tight_layout()
+            ax.set_title(title, fontsize=14)
 
-            plt.show()
+            if not external_axes:
+                theme.visualize_output()
 
         elif len(companies_per_country) == 1:
-            print(
+            console.print(
                 f"Only 1 country found '{list(companies_per_country.keys())[0]}'. No pie chart will be depicted."
             )
         else:
-            print("No country found. No pie chart will be depicted.")
-    print("")
+            console.print("No country found. No pie chart will be depicted.")
+    console.print("")
 
     export_data(
         export,

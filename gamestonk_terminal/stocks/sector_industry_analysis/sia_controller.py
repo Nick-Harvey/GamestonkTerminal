@@ -1,18 +1,16 @@
-"""Insider Controller Module"""
+"""Sector and Industry Analysis Controller Module"""
 __docformat__ = "numpy"
 
 import argparse
 import difflib
 from typing import List
 import yfinance as yf
-from colorama import Style
 from prompt_toolkit.completion import NestedCompleter
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
-    get_flair,
     parse_known_args_and_warn,
-    try_except,
-    system_clear,
     check_positive,
     check_proportion_range,
 )
@@ -23,32 +21,28 @@ from gamestonk_terminal.stocks.sector_industry_analysis import (
     financedatabase_model,
     financedatabase_view,
 )
+from gamestonk_terminal.stocks.sector_industry_analysis import (
+    stockanalysis_view,
+    stockanalysis_model,
+)
 from gamestonk_terminal.stocks.comparison_analysis import ca_controller
 
 
-# pylint: disable=inconsistent-return-statements,too-many-public-methods,C0302,R0902
+# pylint: disable=inconsistent-return-statements,C0302,R0902
 
 
-class SectorIndustryAnalysisController:
+class SectorIndustryAnalysisController(BaseController):
     """Sector Industry Analysis Controller class"""
 
-    # Command choices
-    CHOICES = [
-        "cls",
-        "?",
-        "help",
-        "q",
-        "quit",
-        "load",
-    ]
-
     CHOICES_COMMANDS = [
+        "load",
         "clear",
         "industry",
         "sector",
         "country",
         "mktcap",
         "exchange",
+        "period",
         "cps",
         "cpic",
         "cpis",
@@ -56,16 +50,14 @@ class SectorIndustryAnalysisController:
         "cpci",
         "sama",
         "metric",
+        "satma",
+        "vis",
     ]
-
     CHOICES_MENUS = [
         "ca",
     ]
 
-    CHOICES += CHOICES_COMMANDS
-    CHOICES += CHOICES_MENUS
-
-    possible_metrics = [
+    metric_choices = [
         "roa",
         "roe",
         "cr",
@@ -99,7 +91,6 @@ class SectorIndustryAnalysisController:
         "ev",
         "fpe",
     ]
-
     metric_yf_keys = {
         "roa": ("financialData", "returnOnAssets"),
         "roe": ("financialData", "returnOnEquity"),
@@ -136,22 +127,51 @@ class SectorIndustryAnalysisController:
         "fpe": ("defaultKeyStatistics", "forwardPE"),
     }
 
+    vis_choices = (
+        list(stockanalysis_model.sa_keys["BS"].keys())
+        + list(stockanalysis_model.sa_keys["CF"].keys())
+        + list(stockanalysis_model.sa_keys["IS"].keys())
+    )
+
+    mktcap_choices = [
+        "Nano",
+        "Micro",
+        "Small",
+        "Mid",
+        "Large",
+        "Mega",
+        "nano",
+        "micro",
+        "small",
+        "mid",
+        "large",
+        "mega",
+    ]
+    clear_choices = ["industry", "sector", "country", "mktcap"]
+    period_choices = [
+        "Annual",
+        "Quarterly",
+        "Trailing",
+        "annual",
+        "quarterly",
+        "trailing",
+    ]
+    PATH = "/stocks/sia/"
+
     def __init__(
         self,
         ticker: str,
+        queue: List[str] = None,
     ):
-        """Constructor
+        """Constructor"""
+        super().__init__(queue)
 
-        Parameters
-        ----------
-        ticker : str
-            Ticker to be used to analyse sector and industry
-        """
         self.country = "United States"
         self.sector = "Financial Services"
         self.industry = "Financial Data & Stock Exchanges"
         self.mktcap = "Large"
-        self.exclude_exhanges = True
+        self.exclude_exchanges = True
+        self.period = "Annual"
 
         self.ticker = ticker
 
@@ -172,7 +192,6 @@ class SectorIndustryAnalysisController:
                     )
                     if similar_cmd:
                         self.country = similar_cmd[0]
-
                 self.sector = data["summaryProfile"]["sector"]
                 if self.sector not in financedatabase_model.get_sectors():
                     similar_cmd = difflib.get_close_matches(
@@ -183,7 +202,6 @@ class SectorIndustryAnalysisController:
                     )
                     if similar_cmd:
                         self.sector = similar_cmd[0]
-
                 self.industry = data["summaryProfile"]["industry"]
                 if self.industry not in financedatabase_model.get_industries():
                     similar_cmd = difflib.get_close_matches(
@@ -194,10 +212,8 @@ class SectorIndustryAnalysisController:
                     )
                     if similar_cmd:
                         self.industry = similar_cmd[0]
-
             if "price" in data:
                 mktcap = data["price"]["marketCap"]
-
                 if mktcap < 2_000_000_000:
                     self.mktcap = "Small"
                 elif mktcap > 10_000_000_000:
@@ -205,113 +221,104 @@ class SectorIndustryAnalysisController:
                 else:
                     self.mktcap = "Mid"
 
-        self.insider_parser = argparse.ArgumentParser(add_help=False, prog="sia")
-        self.insider_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
-        )
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            choices["mktcap"] = {c: None for c in self.mktcap_choices}
+            choices["period"] = {c: None for c in self.period_choices}
+            choices["clear"] = {c: None for c in self.clear_choices}
+            choices["metric"] = {c: None for c in self.metric_choices}
+            # This menu contains dynamic choices that may change during runtime
+            self.choices = choices
+            self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def update_runtime_choices(self):
+        """Update runtime choices"""
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            self.choices["industry"] = {
+                i: None
+                for i in financedatabase_model.get_industries(
+                    country=self.country, sector=self.sector
+                )
+            }
+            self.choices["sector"] = {
+                s: None
+                for s in financedatabase_model.get_sectors(
+                    industry=self.industry, country=self.country
+                )
+            }
+            self.choices["country"] = {
+                c: None
+                for c in financedatabase_model.get_countries(
+                    industry=self.industry, sector=self.sector
+                )
+            }
+            self.completer = NestedCompleter.from_nested_dict(self.choices)
 
     def print_help(self):
         """Print help"""
-        params = not any([self.industry, self.sector, self.country])
-        s = Style.DIM if not self.sector else ""
-        i = Style.DIM if not self.industry else ""
-        c = Style.DIM if not self.country else ""
-        m = Style.DIM if not self.mktcap else ""
-        r = Style.RESET_ALL
-        help_text = f"""
-Sector and Industry Analysis:
-    cls           clear screen
-    ?/help        show this menu again
-    q             quit this menu, and shows back to main menu
-    quit          quit to abandon program
-    load          load a ticker and get its industry, sector, country and market cap
+        s = "[unvl]" if not self.sector else ""
+        i = "[unvl]" if not self.industry else ""
+        c = "[unvl]" if not self.country else ""
+        m = "[unvl]" if not self.mktcap else ""
+        s_ = "[/unvl]" if not self.sector else ""
+        i_ = "[/unvl]" if not self.industry else ""
+        c_ = "[/unvl]" if not self.country else ""
+        m_ = "[/unvl]" if not self.mktcap else ""
+        has_no_tickers = "[unvl]" if len(self.tickers) == 0 else "[menu]"
+        has_no_tickers_ = "[unvl/]" if len(self.tickers) == 0 else "[/menu]"
+        help_text = f"""[cmds]
+    load          load a specific ticker and all it's corresponding parameters
 
     clear         clear all or one of industry, sector, country and market cap parameters
     industry      see existing industries, or set industry if arg specified
     sector        see existing sectors, or set sector if arg specified
     country       see existing countries, or set country if arg specified
-    mktcap        set mktcap between small, mid or large
+    mktcap        set mktcap between nano, micro, small, mid, large or mega
     exchange      revert exclude international exchanges flag
+    period        set period between annual, quarterly or trailing [src][StockAnalyis][/src]
+[/cmds]
+[param]Industry          : [/param]{self.industry}
+[param]Sector            : [/param]{self.sector}
+[param]Country           : [/param]{self.country}
+[param]Market Cap        : [/param]{self.mktcap}
+[param]Exclude Exchanges : [/param]{self.exclude_exchanges}
+[param]Period            : [/param]{self.period}
 
-Industry          : {self.industry}
-Sector            : {self.sector}
-Country           : {self.country}
-Market Cap        : {self.mktcap}
-Exclude Exchanges : {self.exclude_exhanges}
+[info]Statistics[/info]{c}[cmds]
+    cps           companies per Sector based on Country{c_}{m} and Market Cap{m_}{c}
+    cpic          companies per Industry based on Country{c_}{m} and Market Cap{m_}{s}
+    cpis          companies per Industry based on Sector{s_}{m} and Market Cap{m_}{s}
+    cpcs          companies per Country based on Sector{s_}{m} and Market Cap{m_}{i}
+    cpci          companies per Country based on Industry{i_}{m} and Market Cap{m_}[/cmds]
 
-Statistics{c}
-    cps           companies per Sector based on Country{m} and Market Cap{r}{c}
-    cpic          companies per Industry based on Country{m} and Market Cap{r}{s}
-    cpis          companies per Industry based on Sector{m} and Market Cap{r}{s}
-    cpcs          companies per Country based on Sector{m} and Market Cap{r}{i}
-    cpci          companies per Country based on Industry{m} and Market Cap{r}
-{r}{Style.DIM if params else ''}
-Financials {'- loaded data (fast mode) 'if self.stocks_data else ''}
+[info]Financials {'- loaded data (fast mode) 'if self.stocks_data else ''}[/info] [src][Yahoo Finance][/src] [cmds]
     sama          see all metrics available
-    metric        visualise financial metric across filters selected
-{r if params else ''}{Style.DIM if len(self.tickers) == 0 else ''}
-Returned tickers: {', '.join(self.tickers)}
+    metric        visualise financial metric across filters selected[/cmds]
+[info]Financials {'- loaded data (fast mode) 'if self.stocks_data else ''}[/info] [src][StockAnalyis][/src] [cmds]
+    satma         see all metrics available over time
+    vis           visualise financial metric across filters selected[/cmds]
+{has_no_tickers}
+[param]Returned tickers: [/param]{', '.join(self.tickers)}
 >   ca            take these to comparison analysis menu
-{r if len(self.tickers) == 0 else ''}"""
-        print(help_text)
+{has_no_tickers_}"""
+        console.print(text=help_text, menu="Stocks - Sector and Industry Analysis")
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
+    def custom_reset(self):
+        """Class specific component of reset command"""
+        if self.ticker:
+            return ["stocks", f"load {self.ticker}", "sia"]
+        return []
 
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self.insider_parser.parse_known_args(
-            an_input.split()
-        )
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
-
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
-
-    @try_except
     def call_load(self, other_args: List[str]):
         """Process load command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="load",
-            description="Load stock ticker to perform analysis on. When the data source is 'yf', an Indian ticker can be"
-            " loaded by using '.NS' at the end, e.g. 'SBIN.NS'. See available market in"
-            " https://help.yahoo.com/kb/exchanges-data-providers-yahoo-finance-sln2310.html.",
+            description="Load stock ticker to perform analysis on. When the data source"
+            + " is 'yf', an Indian ticker can be loaded by using '.NS' at the end,"
+            + " e.g. 'SBIN.NS'. See available market in"
+            + " https://help.yahoo.com/kb/exchanges-data-providers-yahoo-finance-sln2310.html.",
         )
         parser.add_argument(
             "-t",
@@ -321,74 +328,70 @@ Returned tickers: {', '.join(self.tickers)}
             required="-h" not in other_args,
             help="Stock ticker",
         )
-
-        # For the case where a user uses: 'load BB'
-        if other_args and "-t" not in other_args and "-h" not in other_args:
+        if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-t")
-
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        df_stock_candidate = stocks_helper.load(
-            ns_parser.ticker,
-        )
-
-        if not df_stock_candidate.empty:
-            if "." in ns_parser.ticker:
-                self.ticker = ns_parser.ticker.upper().split(".")[0]
-            else:
-                self.ticker = ns_parser.ticker.upper()
-
-            data = yf.utils.get_json(f"https://finance.yahoo.com/quote/{self.ticker}")
-
-            if "summaryProfile" in data:
-                self.country = data["summaryProfile"]["country"]
-                if self.country not in financedatabase_model.get_countries():
-                    similar_cmd = difflib.get_close_matches(
-                        self.country,
-                        financedatabase_model.get_countries(),
-                        n=1,
-                        cutoff=0.7,
-                    )
-                    if similar_cmd:
-                        self.country = similar_cmd[0]
-
-                self.sector = data["summaryProfile"]["sector"]
-                if self.sector not in financedatabase_model.get_sectors():
-                    similar_cmd = difflib.get_close_matches(
-                        self.sector,
-                        financedatabase_model.get_sectors(),
-                        n=1,
-                        cutoff=0.7,
-                    )
-                    if similar_cmd:
-                        self.sector = similar_cmd[0]
-
-                self.industry = data["summaryProfile"]["industry"]
-                if self.industry not in financedatabase_model.get_industries():
-                    similar_cmd = difflib.get_close_matches(
-                        self.industry,
-                        financedatabase_model.get_industries(),
-                        n=1,
-                        cutoff=0.7,
-                    )
-                    if similar_cmd:
-                        self.industry = similar_cmd[0]
-
-            if "price" in data:
-                mktcap = data["price"]["marketCap"]
-
-                if mktcap < 2_000_000_000:
-                    self.mktcap = "Small"
-                elif mktcap > 10_000_000_000:
-                    self.mktcap = "Large"
+        if ns_parser:
+            df_stock_candidate = stocks_helper.load(
+                ns_parser.ticker,
+            )
+            if not df_stock_candidate.empty:
+                if "." in ns_parser.ticker:
+                    self.ticker = ns_parser.ticker.upper().split(".")[0]
                 else:
-                    self.mktcap = "Mid"
+                    self.ticker = ns_parser.ticker.upper()
 
-            self.stocks_data = {}
+                data = yf.utils.get_json(
+                    f"https://finance.yahoo.com/quote/{self.ticker}"
+                )
 
-    @try_except
+                if "summaryProfile" in data:
+                    self.country = data["summaryProfile"]["country"]
+                    if self.country not in financedatabase_model.get_countries():
+                        similar_cmd = difflib.get_close_matches(
+                            self.country,
+                            financedatabase_model.get_countries(),
+                            n=1,
+                            cutoff=0.7,
+                        )
+                        if similar_cmd:
+                            self.country = similar_cmd[0]
+
+                    self.sector = data["summaryProfile"]["sector"]
+                    if self.sector not in financedatabase_model.get_sectors():
+                        similar_cmd = difflib.get_close_matches(
+                            self.sector,
+                            financedatabase_model.get_sectors(),
+                            n=1,
+                            cutoff=0.7,
+                        )
+                        if similar_cmd:
+                            self.sector = similar_cmd[0]
+
+                    self.industry = data["summaryProfile"]["industry"]
+                    if self.industry not in financedatabase_model.get_industries():
+                        similar_cmd = difflib.get_close_matches(
+                            self.industry,
+                            financedatabase_model.get_industries(),
+                            n=1,
+                            cutoff=0.7,
+                        )
+                        if similar_cmd:
+                            self.industry = similar_cmd[0]
+
+                if "price" in data:
+                    mktcap = data["price"]["marketCap"]
+
+                    if mktcap < 2_000_000_000:
+                        self.mktcap = "Small"
+                    elif mktcap > 10_000_000_000:
+                        self.mktcap = "Large"
+                    else:
+                        self.mktcap = "Mid"
+
+                self.stocks_data = {}
+                self.update_runtime_choices()
+
     def call_industry(self, other_args: List[str]):
         """Process industry command"""
         parser = argparse.ArgumentParser(
@@ -405,63 +408,56 @@ Returned tickers: {', '.join(self.tickers)}
             nargs="+",
             help="industry to select",
         )
-
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-n")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-n")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        possible_industries = financedatabase_model.get_industries(
-            country=self.country,
-            sector=self.sector,
-        )
-
-        if ns_parser.name:
-            if " ".join(ns_parser.name) in possible_industries:
-                self.industry = " ".join(ns_parser.name)
-                # if we get the industry, then we also automatically know the sector
-                self.sector = financedatabase_model.get_sectors(industry=self.industry)[
-                    0
-                ]
-            else:
-                print(f"Industry '{' '.join(ns_parser.name)}' does not exist.")
-
-                similar_cmd = difflib.get_close_matches(
-                    " ".join(ns_parser.name),
-                    possible_industries,
-                    n=1,
-                    cutoff=0.75,
-                )
-
-                if similar_cmd:
-                    print(f"Replacing by '{similar_cmd[0]}'")
-                    self.industry = similar_cmd[0]
+        if ns_parser:
+            possible_industries = financedatabase_model.get_industries(
+                country=self.country,
+                sector=self.sector,
+            )
+            if ns_parser.name:
+                if " ".join(ns_parser.name) in possible_industries:
+                    self.industry = " ".join(ns_parser.name)
                     # if we get the industry, then we also automatically know the sector
                     self.sector = financedatabase_model.get_sectors(
                         industry=self.industry
                     )[0]
-
+                    self.update_runtime_choices()
                 else:
+                    console.print(
+                        f"Industry '{' '.join(ns_parser.name)}' does not exist."
+                    )
                     similar_cmd = difflib.get_close_matches(
                         " ".join(ns_parser.name),
                         possible_industries,
                         n=1,
-                        cutoff=0.5,
+                        cutoff=0.75,
                     )
                     if similar_cmd:
-                        print(f"Did you mean '{similar_cmd[0]}'?")
+                        console.print(f"Replacing by '{similar_cmd[0]}'")
+                        self.industry = similar_cmd[0]
+                        # if we get the industry, then we also automatically know the sector
+                        self.sector = financedatabase_model.get_sectors(
+                            industry=self.industry
+                        )[0]
+                        self.update_runtime_choices()
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            " ".join(ns_parser.name),
+                            possible_industries,
+                            n=1,
+                            cutoff=0.5,
+                        )
+                        if similar_cmd:
+                            console.print(f"Did you mean '{similar_cmd[0]}'?")
+            else:
+                for industry in possible_industries:
+                    console.print(industry)
 
-        else:
-            for industry in possible_industries:
-                print(industry)
+            self.stocks_data = {}
+            console.print("")
 
-        self.stocks_data = {}
-        print("")
-
-    @try_except
     def call_sector(self, other_args: List[str]):
         """Process sector command"""
         parser = argparse.ArgumentParser(
@@ -478,54 +474,50 @@ Returned tickers: {', '.join(self.tickers)}
             nargs="+",
             help="sector to select",
         )
-
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-n")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-n")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        possible_sectors = financedatabase_model.get_sectors(
-            self.industry, self.country
-        )
-
-        if ns_parser.name:
-            if " ".join(ns_parser.name) in possible_sectors:
-                self.sector = " ".join(ns_parser.name)
-            else:
-                print(f"Sector '{' '.join(ns_parser.name)}' does not exist.")
-
-                similar_cmd = difflib.get_close_matches(
-                    " ".join(ns_parser.name),
-                    possible_sectors,
-                    n=1,
-                    cutoff=0.75,
-                )
-
-                if similar_cmd:
-                    print(f"Replacing by '{similar_cmd[0]}'")
-                    self.sector = similar_cmd[0]
-
+        if ns_parser:
+            possible_sectors = financedatabase_model.get_sectors(
+                self.industry, self.country
+            )
+            if ns_parser.name:
+                if " ".join(ns_parser.name) in possible_sectors:
+                    self.sector = " ".join(ns_parser.name)
+                    self.update_runtime_choices()
                 else:
+                    console.print(
+                        f"Sector '{' '.join(ns_parser.name)}' does not exist."
+                    )
+
                     similar_cmd = difflib.get_close_matches(
                         " ".join(ns_parser.name),
                         possible_sectors,
                         n=1,
-                        cutoff=0.5,
+                        cutoff=0.75,
                     )
+
                     if similar_cmd:
-                        print(f"Did you mean '{similar_cmd[0]}'?")
+                        console.print(f"Replacing by '{similar_cmd[0]}'")
+                        self.sector = similar_cmd[0]
+                        self.update_runtime_choices()
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            " ".join(ns_parser.name),
+                            possible_sectors,
+                            n=1,
+                            cutoff=0.5,
+                        )
+                        if similar_cmd:
+                            console.print(f"Did you mean '{similar_cmd[0]}'?")
 
-        else:
-            for sector in possible_sectors:
-                print(sector)
+            else:
+                for sector in possible_sectors:
+                    console.print(sector)
 
-        self.stocks_data = {}
-        print("")
+            self.stocks_data = {}
+            console.print("")
 
-    @try_except
     def call_country(self, other_args: List[str]):
         """Process country command"""
         parser = argparse.ArgumentParser(
@@ -542,54 +534,47 @@ Returned tickers: {', '.join(self.tickers)}
             nargs="+",
             help="country to select",
         )
-
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-n")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-n")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        possible_countries = financedatabase_model.get_countries(
-            industry=self.industry, sector=self.sector
-        )
-
-        if ns_parser.name:
-            if " ".join(ns_parser.name) in possible_countries:
-                self.country = " ".join(ns_parser.name)
-            else:
-                print(f"Country '{' '.join(ns_parser.name)}' does not exist.")
-
-                similar_cmd = difflib.get_close_matches(
-                    " ".join(ns_parser.name),
-                    possible_countries,
-                    n=1,
-                    cutoff=0.75,
-                )
-
-                if similar_cmd:
-                    print(f"Replacing by '{similar_cmd[0]}'")
-                    self.country = similar_cmd[0]
-
+        if ns_parser:
+            possible_countries = financedatabase_model.get_countries(
+                industry=self.industry, sector=self.sector
+            )
+            if ns_parser.name:
+                if " ".join(ns_parser.name) in possible_countries:
+                    self.country = " ".join(ns_parser.name)
+                    self.update_runtime_choices()
                 else:
+                    console.print(
+                        f"Country '{' '.join(ns_parser.name)}' does not exist."
+                    )
                     similar_cmd = difflib.get_close_matches(
                         " ".join(ns_parser.name),
                         possible_countries,
                         n=1,
-                        cutoff=0.5,
+                        cutoff=0.75,
                     )
                     if similar_cmd:
-                        print(f"Did you mean '{similar_cmd[0]}'?")
+                        console.print(f"Replacing by '{similar_cmd[0]}'")
+                        self.country = similar_cmd[0]
+                        self.update_runtime_choices()
+                    else:
+                        similar_cmd = difflib.get_close_matches(
+                            " ".join(ns_parser.name),
+                            possible_countries,
+                            n=1,
+                            cutoff=0.5,
+                        )
+                        if similar_cmd:
+                            console.print(f"Did you mean '{similar_cmd[0]}'?")
+            else:
+                for country in possible_countries:
+                    console.print(country)
 
-        else:
-            for country in possible_countries:
-                print(country)
+            self.stocks_data = {}
+            console.print("")
 
-        self.stocks_data = {}
-        print("")
-
-    @try_except
     def call_mktcap(self, other_args: List[str]):
         """Process mktcap command"""
         parser = argparse.ArgumentParser(
@@ -603,28 +588,22 @@ Returned tickers: {', '.join(self.tickers)}
             "--name",
             type=str,
             dest="name",
-            choices=["Small", "Mid", "Large", "small", "mid", "large"],
+            choices=self.mktcap_choices,
             help="market cap to select",
         )
-
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-n")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-n")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            if ns_parser.name:
+                self.mktcap = ns_parser.name.capitalize()
+            else:
+                console.print("Select between market cap: Small, Mid and Large")
 
-        if ns_parser.name:
-            self.mktcap = ns_parser.name.capitalize()
+            self.stocks_data = {}
+            console.print("")
 
-        else:
-            print("Select between market cap: Small, Mid and Large")
-
-        self.stocks_data = {}
-        print("")
-
-    @try_except
+    # pylint:disable=attribute-defined-outside-init
     def call_exchange(self, other_args: List[str]):
         """Process exchange command"""
         parser = argparse.ArgumentParser(
@@ -634,15 +613,16 @@ Returned tickers: {', '.join(self.tickers)}
             description="Swap exclude international exchanges flag",
         )
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        self.exclude_exhanges = not self.exclude_exhanges
+        if ns_parser:
+            self.exclude_exchanges = not self.exclude_exchanges
+            console.print(
+                f"International exchanges {'excluded' if self.exclude_exchanges else 'included'}",
+                "\n",
+            )
 
         self.stocks_data = {}
-        print("")
+        console.print("")
 
-    @try_except
     def call_clear(self, other_args: List[str]):
         """Process clear command"""
         parser = argparse.ArgumentParser(
@@ -653,42 +633,64 @@ Returned tickers: {', '.join(self.tickers)}
         )
         parser.add_argument(
             "-p",
-            "--parameter",
+            "--param",
             type=str,
             dest="parameter",
-            choices=["industry", "sector", "country", "mktcap"],
+            choices=self.clear_choices,
             help="parameter to clear",
         )
-
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-p")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-p")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            if ns_parser.parameter == "industry":
+                self.industry = ""
+            elif ns_parser.parameter == "sector":
+                self.sector = ""
+            elif ns_parser.parameter == "country":
+                self.country = ""
+            elif ns_parser.parameter == "mktcap":
+                self.mktcap = ""
+            else:
+                self.industry = ""
+                self.sector = ""
+                self.country = ""
+                self.mktcap = ""
 
-        if ns_parser.parameter == "industry":
-            self.industry = ""
-        elif ns_parser.parameter == "sector":
-            self.sector = ""
-        elif ns_parser.parameter == "country":
-            self.country = ""
-        elif ns_parser.parameter == "mktcap":
-            self.mktcap = ""
-        else:
-            self.industry = ""
-            self.sector = ""
-            self.country = ""
-            self.mktcap = ""
+            self.exclude_exchanges = True
+            self.ticker = ""
+            self.update_runtime_choices()
+            self.stocks_data = {}
+            console.print("")
 
-        self.exclude_exhanges = True
-        self.ticker = ""
-        self.stocks_data = {}
+    def call_period(self, other_args: List[str]):
+        """Process period command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="period",
+            description="Set period between annual, quarterly and trailing",
+        )
+        parser.add_argument(
+            "-n",
+            "--name",
+            type=str,
+            dest="name",
+            choices=self.period_choices,
+            help="period to select",
+        )
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-n")
+        ns_parser = parse_known_args_and_warn(parser, other_args)
+        if ns_parser:
+            if ns_parser.name:
+                self.period = ns_parser.name.capitalize()
+            else:
+                console.print("Select between period: Annual, Quarterly and Trailing")
 
-        print("")
+            self.stocks_data = {}
+            console.print("")
 
-    @try_except
     def call_sama(self, other_args: List[str]):
         """Process sama command"""
         parser = argparse.ArgumentParser(
@@ -697,56 +699,52 @@ Returned tickers: {', '.join(self.tickers)}
             prog="sama",
             description="See all metrics available",
         )
-
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            help_text = """
+        roa           return on assets
+        roe           return on equity
+        cr            current ratio
+        qr            quick ratio
+        de            debt to equity
+        tc            total cash
+        tcs           total cash per share
+        tr            total revenue
+        rps           revenue per share
+        rg            revenue growth
+        eg            earnings growth
+        pm            profit margins
+        gp            gross profits
+        gm            gross margins
+        ocf           operating cash flow
+        om            operating margins
+        fcf           free cash flow
+        td            total debt
+        ebitda        earnings before interest, taxes, depreciation and amortization
+        ebitdam       ebitda margins
+        rec           recommendation mean
+        mc            market cap
+        fte           full time employees
+        er            enterprise to revenue
+        bv            book value
+        ss            shares short
+        pb            price to book
+        beta          beta
+        fs            float shares
+        sr            short ratio
+        peg           peg ratio
+        ev            enterprise value
+        fpe           forward P/E
+            """
+            console.print(help_text)
 
-        help_text = """
-    roa           return on assets
-    roe           return on equity
-    cr            current ratio
-    qr            quick ratio
-    de            debt to equity
-    tc            total cash
-    tcs           total cash per share
-    tr            total revenue
-    rps           revenue per share
-    rg            revenue growth
-    eg            earnings growth
-    pm            profit margins
-    gp            gross profits
-    gm            gross margins
-    ocf           operating cash flow
-    om            operating margins
-    fcf           free cash flow
-    td            total debt
-    ebitda        earnings before interest, taxes, depreciation and amortization
-    ebitdam       ebitda margins
-    rec           recommendation mean
-    mc            market cap
-    fte           full time employees
-    er            enterprise to revenue
-    bv            book value
-    ss            shares short
-    pb            price to book
-    beta          beta
-    fs            float shares
-    sr            short ratio
-    peg           peg ratio
-    ev            enterprise value
-    fpe           forward P/E
-        """
-        print(help_text)
-
-    @try_except
     def call_metric(self, other_args: List[str]):
         """Process metric command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="metric",
-            description="Visualise a particular metric with the filters selected",
+            description="Visualize a particular metric with the filters selected",
         )
         parser.add_argument(
             "-m",
@@ -754,9 +752,8 @@ Returned tickers: {', '.join(self.tickers)}
             dest="metric",
             required="-h" not in other_args,
             help="Metric to visualize",
-            choices=self.possible_metrics,
+            choices=self.metric_choices,
         )
-
         parser.add_argument(
             "-l",
             "--limit",
@@ -774,31 +771,142 @@ Returned tickers: {', '.join(self.tickers)}
             help="Output all raw data",
         )
 
-        if other_args:
-            if "-" not in other_args[0]:
-                other_args.insert(0, "-m")
-
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-m")
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            (
+                self.stocks_data,
+                self.tickers,
+            ) = financedatabase_view.display_bars_financials(
+                self.metric_yf_keys[ns_parser.metric][0],
+                self.metric_yf_keys[ns_parser.metric][1],
+                self.country,
+                self.sector,
+                self.industry,
+                self.mktcap,
+                self.exclude_exchanges,
+                ns_parser.limit,
+                ns_parser.export,
+                ns_parser.raw,
+                self.stocks_data,
+            )
 
-        self.stocks_data, self.tickers = financedatabase_view.display_bars_financials(
-            self.metric_yf_keys[ns_parser.metric][0],
-            self.metric_yf_keys[ns_parser.metric][1],
-            self.country,
-            self.sector,
-            self.industry,
-            self.mktcap,
-            self.exclude_exhanges,
-            ns_parser.limit,
-            ns_parser.export,
-            ns_parser.raw,
-            self.stocks_data,
+    def call_satma(self, other_args: List[str]):
+        """Process satma command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="satma",
+            description="See all metrics available",
         )
 
-    @try_except
+        parser.add_argument(
+            "-s",
+            "--statement",
+            dest="statement",
+            help="See all metrics available for the given choice",
+            choices=["BS", "bs", "IS", "is", "CF", "cf", ""],
+        )
+
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-s")
+        ns_parser = parse_known_args_and_warn(parser, other_args)
+
+        help_text = ""
+        statement_string = {
+            "BS": "Balance Sheet Statement",
+            "IS": "Income Statement",
+            "CF": "Cash Flow Statement",
+        }
+
+        if ns_parser.statement:
+            ns_parser.statement = str(ns_parser.statement).upper()
+
+            if ns_parser.statement not in ("IS", "BS", "CF"):
+                console.print(f"{ns_parser.statement} is not a valid option.")
+
+            help_text += f"\n{statement_string[ns_parser.statement]}\n"
+            for k, v in stockanalysis_model.sa_keys[ns_parser.statement].items():
+                help_text += f"  {k} {(10 - len(k)) * ' '} {v} \n"
+
+        else:
+            for statement, statement_value in stockanalysis_model.sa_keys.items():
+                help_text += f"\n{statement_string[statement]}\n"
+                for k, v in statement_value.items():
+                    help_text += f"  {k} {(10 - len(k)) * ' '} {v} \n"
+
+        console.print(help_text)
+
+    def call_vis(self, other_args: List[str]):
+        """Process vis command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="vis",
+            description="Visualize a particular metric with the filters selected",
+        )
+        parser.add_argument(
+            "-m",
+            "--metric",
+            dest="metric",
+            required="-h" not in other_args,
+            help="Metric to visualize",
+            choices=self.vis_choices,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            default=10,
+            help="Limit number of companies to display",
+            type=check_positive,
+        )
+
+        parser.add_argument(
+            "-p",
+            "--period",
+            dest="period",
+            default=12,
+            help="Limit number of periods to display",
+            type=check_positive,
+        )
+        parser.add_argument(
+            "-r",
+            "--raw",
+            action="store_true",
+            dest="raw",
+            default=False,
+            help="Output all raw data",
+        )
+
+        if other_args and "-" not in other_args[0][0]:
+            other_args.insert(0, "-m")
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+        if ns_parser:
+            (
+                self.stocks_data,
+                self.tickers,
+            ) = stockanalysis_view.display_plots_financials(
+                ns_parser.metric,
+                stockanalysis_model.sa_keys,
+                self.country,
+                self.sector,
+                self.industry,
+                self.period,
+                ns_parser.period,
+                self.mktcap,
+                self.exclude_exchanges,
+                ns_parser.limit,
+                ns_parser.export,
+                ns_parser.raw,
+                self.stocks_data,
+            )
+
     def call_cps(self, other_args: List[str]):
         """Process cps command"""
         parser = argparse.ArgumentParser(
@@ -835,23 +943,20 @@ Returned tickers: {', '.join(self.tickers)}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            if not self.country:
+                console.print("The country parameter needs to be selected!\n")
+            else:
+                financedatabase_view.display_companies_per_sector_in_country(
+                    self.country,
+                    self.mktcap,
+                    self.exclude_exchanges,
+                    ns_parser.export,
+                    ns_parser.raw,
+                    ns_parser.max_sectors_to_display,
+                    ns_parser.min_pct_to_display_sector,
+                )
 
-        if not self.country:
-            print("The country parameter needs to be selected!\n")
-        else:
-            financedatabase_view.display_companies_per_sector_in_country(
-                self.country,
-                self.mktcap,
-                self.exclude_exhanges,
-                ns_parser.export,
-                ns_parser.raw,
-                ns_parser.max_sectors_to_display,
-                ns_parser.min_pct_to_display_sector,
-            )
-
-    @try_except
     def call_cpic(self, other_args: List[str]):
         """Process cpic command"""
         parser = argparse.ArgumentParser(
@@ -888,23 +993,20 @@ Returned tickers: {', '.join(self.tickers)}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            if not self.country:
+                console.print("The country parameter needs to be selected!\n")
+            else:
+                financedatabase_view.display_companies_per_industry_in_country(
+                    self.country,
+                    self.mktcap,
+                    self.exclude_exchanges,
+                    ns_parser.export,
+                    ns_parser.raw,
+                    ns_parser.max_industries_to_display,
+                    ns_parser.min_pct_to_display_industry,
+                )
 
-        if not self.country:
-            print("The country parameter needs to be selected!\n")
-        else:
-            financedatabase_view.display_companies_per_industry_in_country(
-                self.country,
-                self.mktcap,
-                self.exclude_exhanges,
-                ns_parser.export,
-                ns_parser.raw,
-                ns_parser.max_industries_to_display,
-                ns_parser.min_pct_to_display_industry,
-            )
-
-    @try_except
     def call_cpis(self, other_args: List[str]):
         """Process cpis command"""
         parser = argparse.ArgumentParser(
@@ -941,23 +1043,20 @@ Returned tickers: {', '.join(self.tickers)}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            if not self.sector:
+                console.print("The sector parameter needs to be selected!\n")
+            else:
+                financedatabase_view.display_companies_per_industry_in_sector(
+                    self.sector,
+                    self.mktcap,
+                    self.exclude_exchanges,
+                    ns_parser.export,
+                    ns_parser.raw,
+                    ns_parser.max_industries_to_display,
+                    ns_parser.min_pct_to_display_industry,
+                )
 
-        if not self.sector:
-            print("The sector parameter needs to be selected!\n")
-        else:
-            financedatabase_view.display_companies_per_industry_in_sector(
-                self.sector,
-                self.mktcap,
-                self.exclude_exhanges,
-                ns_parser.export,
-                ns_parser.raw,
-                ns_parser.max_industries_to_display,
-                ns_parser.min_pct_to_display_industry,
-            )
-
-    @try_except
     def call_cpcs(self, other_args: List[str]):
         """Process cpcs command"""
         parser = argparse.ArgumentParser(
@@ -994,23 +1093,20 @@ Returned tickers: {', '.join(self.tickers)}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            if not self.sector:
+                console.print("The sector parameter needs to be selected!\n")
+            else:
+                financedatabase_view.display_companies_per_country_in_sector(
+                    self.sector,
+                    self.mktcap,
+                    self.exclude_exchanges,
+                    ns_parser.export,
+                    ns_parser.raw,
+                    ns_parser.max_countries_to_display,
+                    ns_parser.min_pct_to_display_country,
+                )
 
-        if not self.sector:
-            print("The sector parameter needs to be selected!\n")
-        else:
-            financedatabase_view.display_companies_per_country_in_sector(
-                self.sector,
-                self.mktcap,
-                self.exclude_exhanges,
-                ns_parser.export,
-                ns_parser.raw,
-                ns_parser.max_countries_to_display,
-                ns_parser.min_pct_to_display_country,
-            )
-
-    @try_except
     def call_cpci(self, other_args: List[str]):
         """Process cpci command"""
         parser = argparse.ArgumentParser(
@@ -1047,84 +1143,27 @@ Returned tickers: {', '.join(self.tickers)}
         ns_parser = parse_known_args_and_warn(
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
-
-        if not self.industry:
-            print("The industry parameter needs to be selected!\n")
-        else:
-            financedatabase_view.display_companies_per_country_in_industry(
-                self.industry,
-                self.mktcap,
-                self.exclude_exhanges,
-                ns_parser.export,
-                ns_parser.raw,
-                ns_parser.max_countries_to_display,
-                ns_parser.min_pct_to_display_country,
-            )
+        if ns_parser:
+            if not self.industry:
+                console.print("The industry parameter needs to be selected!\n")
+            else:
+                financedatabase_view.display_companies_per_country_in_industry(
+                    self.industry,
+                    self.mktcap,
+                    self.exclude_exchanges,
+                    ns_parser.export,
+                    ns_parser.raw,
+                    ns_parser.max_countries_to_display,
+                    ns_parser.min_pct_to_display_country,
+                )
 
     def call_ca(self, _):
         """Call the comparison analysis menu with selected tickers"""
         if self.tickers:
-            return ca_controller.menu(self.tickers)
-
-        print("No main ticker loaded to go into comparison analysis menu", "\n")
-
-
-def menu(
-    ticker: str,
-):
-    """Sector and Industry Analysis Menu"""
-    sia_controller = SectorIndustryAnalysisController(ticker)
-    sia_controller.call_help(None)
-
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in sia_controller.CHOICES}
-
-            choices["industry"] = {
-                i: None
-                for i in financedatabase_model.get_industries(
-                    country=sia_controller.country, sector=sia_controller.sector
-                )
-            }
-            choices["sector"] = {
-                s: None
-                for s in financedatabase_model.get_sectors(
-                    industry=sia_controller.industry, country=sia_controller.country
-                )
-            }
-            choices["country"] = {
-                c: None
-                for c in financedatabase_model.get_countries(
-                    industry=sia_controller.industry, sector=sia_controller.sector
-                )
-            }
-            choices["metric"] = {c: None for c in sia_controller.possible_metrics}
-
-            completer = NestedCompleter.from_nested_dict(choices)
-            an_input = session.prompt(
-                f"{get_flair()} (stocks)>(sia)> ",
-                completer=completer,
-                search_ignore_case=True,
-            )
-
+            self.queue = ca_controller.ComparisonAnalysisController(
+                self.tickers, self.queue
+            ).menu(custom_path_menu_above="/stocks/")
         else:
-            an_input = input(f"{get_flair()} (stocks)>(sia)> ")
-
-        try:
-            process_input = sia_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            similar_cmd = difflib.get_close_matches(
-                an_input, sia_controller.CHOICES, n=1, cutoff=0.7
+            console.print(
+                "No main ticker loaded to go into comparison analysis menu", "\n"
             )
-
-            if similar_cmd:
-                print(f"Did you mean '{similar_cmd[0]}'?\n")
-            continue

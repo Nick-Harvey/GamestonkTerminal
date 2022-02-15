@@ -1,24 +1,20 @@
-import discord
-import discordbot.config_discordbot as cfg
-from discordbot.helpers import pagination
+import disnake
+from menus.menu import Menu
 
+import discordbot.config_discordbot as cfg
+from discordbot.config_discordbot import logger
 from gamestonk_terminal.stocks.dark_pool_shorts import yahoofinance_model
 
 
-async def shorted_command(ctx, num="10"):
+async def shorted_command(ctx, num: int = 10):
     """Show most shorted stocks [Yahoo Finance]"""
 
     try:
         # Debug user input
         if cfg.DEBUG:
-            print(f"\n!stocks.dps.shorted {num}")
+            logger.debug("!stocks.dps.shorted %s", num)
 
         # Check for argument
-        if not num.lstrip("-").isnumeric():
-            raise Exception("Number has to be an integer")
-
-        num = int(num)
-
         if num < 0:
             raise Exception("Number has to be above 0")
 
@@ -27,7 +23,7 @@ async def shorted_command(ctx, num="10"):
 
         # Debug user output
         if cfg.DEBUG:
-            print(df.to_string())
+            logger.debug(df.to_string())
 
         # Output data
         df.dropna(how="all", axis=1, inplace=True)
@@ -37,16 +33,26 @@ async def shorted_command(ctx, num="10"):
         df.columns = future_column_name
         df.drop("Symbol")
         columns = []
-
-        initial_str = "Page 0: Overview"
+        choices = [
+            disnake.SelectOption(label="Overview", value="0", emoji="🟢"),
+        ]
+        initial_str = "Overview"
         i = 1
-
         for col_name in df.columns.values:
+            menu = f"\nPage {i}: {col_name}"
             initial_str += f"\nPage {i}: {col_name}"
+            if i < 19:
+                choices.append(
+                    disnake.SelectOption(label=menu, value=f"{i}", emoji="🟢"),
+                )
+            if i == 20:
+                choices.append(
+                    disnake.SelectOption(label="Max Reached", value=f"{i}", emoji="🟢"),
+                )
             i += 1
 
         columns.append(
-            discord.Embed(
+            disnake.Embed(
                 title="Stocks: [Yahoo Finance] Most Shorted",
                 description=initial_str,
                 colour=cfg.COLOR,
@@ -57,7 +63,7 @@ async def shorted_command(ctx, num="10"):
         )
         for column in df.columns.values:
             columns.append(
-                discord.Embed(
+                disnake.Embed(
                     description="```" + df[column].fillna("").to_string() + "```",
                     colour=cfg.COLOR,
                 ).set_author(
@@ -66,10 +72,10 @@ async def shorted_command(ctx, num="10"):
                 )
             )
 
-        await pagination(columns, ctx)
+        await ctx.send(embed=columns[0], view=Menu(columns, choices))
 
     except Exception as e:
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="ERROR Stocks: [Yahoo Finance] Most Shorted",
             colour=cfg.COLOR,
             description=e,
@@ -79,4 +85,4 @@ async def shorted_command(ctx, num="10"):
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

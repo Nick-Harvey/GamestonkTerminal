@@ -1,13 +1,20 @@
 """Eclect.us model"""
 __docformat__ = "numpy"
 
+import logging
 from collections import OrderedDict
+
 import requests
-from colorama import Style
+
+from gamestonk_terminal.decorators import log_start_end
 
 # pylint: disable=R1718
 
 
+logger = logging.getLogger(__name__)
+
+
+@log_start_end(log=logger)
 def get_filings_analysis(ticker: str) -> str:
     """Save time reading SEC filings with the help of machine learning. [Source: https://eclect.us]
 
@@ -29,16 +36,14 @@ def get_filings_analysis(ticker: str) -> str:
     else:
         response_dict = response.json()
 
-        rf_highlights = f"{Style.BRIGHT}\n\tRISK FACTORS:{Style.RESET_ALL}\n"
+        rf_highlights = "[bold]\n\tRISK FACTORS:[/bold]\n"
         rf_highlights_list = [
             sentence["sentence"] for sentence in response_dict[0]["rf_highlights"]
         ]
         rf_highlights_list = list(OrderedDict.fromkeys(rf_highlights_list))
         rf_highlights_txt = "\n\n".join(rf_highlights_list)
 
-        daa_highlights = (
-            f"{Style.BRIGHT}\n\tDISCUSSION AND ANALYSIS:{Style.RESET_ALL}\n"
-        )
+        daa_highlights = "[bold]\n\tDISCUSSION AND ANALYSIS:[/bold]\n"
         daa_highlights_list = [
             sentence["sentence"] for sentence in response_dict[0]["daa_highlights"]
         ]

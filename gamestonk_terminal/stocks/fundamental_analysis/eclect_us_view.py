@@ -1,9 +1,16 @@
 """Eclect.us view"""
 __docformat__ = "numpy"
 
+import logging
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.fundamental_analysis import eclect_us_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def display_analysis(
     ticker: str,
 ) -> None:
@@ -18,7 +25,7 @@ def display_analysis(
     analysis = eclect_us_model.get_filings_analysis(ticker)
 
     if analysis:
-        print(analysis)
+        console.print(analysis)
     else:
-        print("Filings not found from eclect.us")
-    print("")
+        console.print("Filings not found from eclect.us")
+    console.print("")

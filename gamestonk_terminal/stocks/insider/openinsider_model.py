@@ -1,10 +1,17 @@
+import configparser
+import logging
+import os
 from datetime import datetime
 from typing import Dict, List
-import os
-import configparser
+
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 presets_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
 
@@ -525,6 +532,7 @@ d_SectorSubsectorIndustry = {
 }
 
 
+@log_start_end(log=logger)
 def check_valid_range(
     category: str, field: str, val: str, min_range: int, max_range: int
 ) -> str:
@@ -565,6 +573,7 @@ def check_valid_range(
     return error
 
 
+@log_start_end(log=logger)
 def check_dates(d_date: Dict) -> str:
     """Check valid dates
 
@@ -604,11 +613,11 @@ def check_dates(d_date: Dict) -> str:
     else:
         if d_date["FilingDate"] == "Custom":
             try:
-                datetime.strptime(d_date["FilingDateFrom"], "%d/%m/%Y")
+                datetime.strptime(d_date["FilingDateFrom"], "%Y-%m-%d")
             except ValueError:
                 error += f"Invalid FilingDateFrom '{d_date['FilingDateFrom']}' (format: dd/mm/yyyy).\n"
             try:
-                datetime.strptime(d_date["FilingDateTo"], "%d/%m/%Y")
+                datetime.strptime(d_date["FilingDateTo"], "%Y-%m-%d")
             except ValueError:
                 error += f"Invalid FilingDateTo '{d_date['FilingDateTo']}' (format: dd/mm/yyyy).\n"
 
@@ -620,18 +629,19 @@ def check_dates(d_date: Dict) -> str:
     else:
         if d_date["TradingDate"] == "Custom":
             try:
-                datetime.strptime(d_date["TradingDateFrom"], "%d/%m/%Y")
+                datetime.strptime(d_date["TradingDateFrom"], "%Y-%m-%d")
             except ValueError:
                 error += f"Invalid TradingDateFrom '{d_date['TradingDateFrom']}' (format: dd/mm/yyyy).\n"
 
             try:
-                datetime.strptime(d_date["TradingDateTo"], "%d/%m/%Y")
+                datetime.strptime(d_date["TradingDateTo"], "%Y-%m-%d")
             except ValueError:
                 error += f"Invalid TradingDateTo '{d_date['TradingDateTo']}' (format: dd/mm/yyyy).\n"
 
     return error
 
 
+@log_start_end(log=logger)
 def check_valid_multiple(category: str, field: str, val: str, multiple: int) -> str:
     """Check valid value being a multiple
 
@@ -665,6 +675,7 @@ def check_valid_multiple(category: str, field: str, val: str, multiple: int) -> 
     return error
 
 
+@log_start_end(log=logger)
 def check_boolean_list(category: str, d_data: Dict, l_fields_to_check: List) -> str:
     """Check list of fields being bools
 
@@ -691,6 +702,7 @@ def check_boolean_list(category: str, d_data: Dict, l_fields_to_check: List) -> 
     return error
 
 
+@log_start_end(log=logger)
 def check_in_list(
     category: str, field: str, val: int, l_possible_vals: List[str]
 ) -> str:
@@ -724,6 +736,7 @@ def check_in_list(
     return error
 
 
+@log_start_end(log=logger)
 def check_int_in_list(
     category: str, field: str, val: str, l_possible_vals: List[int]
 ) -> str:
@@ -763,6 +776,7 @@ def check_int_in_list(
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_general(d_general) -> str:
     """Check valid open insider general
 
@@ -795,6 +809,7 @@ def check_open_insider_general(d_general) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_date(d_date: Dict) -> str:
     """Check valid open insider date
 
@@ -820,6 +835,7 @@ def check_open_insider_date(d_date: Dict) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_transaction_filing(d_transaction_filing: Dict) -> str:
     """Check valid open insider transaction filing
 
@@ -875,6 +891,7 @@ def check_open_insider_transaction_filing(d_transaction_filing: Dict) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_industry(d_industry: Dict) -> str:
     """Check valid open insider industry
 
@@ -895,6 +912,7 @@ def check_open_insider_industry(d_industry: Dict) -> str:
     return ""
 
 
+@log_start_end(log=logger)
 def check_open_insider_insider_title(d_insider_title: Dict) -> str:
     """Check valid open insider title
 
@@ -927,6 +945,7 @@ def check_open_insider_insider_title(d_insider_title: Dict) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_others(d_others: Dict) -> str:
     """Check valid open insider others
 
@@ -956,6 +975,7 @@ def check_open_insider_others(d_others: Dict) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_company_totals(d_company_totals: Dict) -> str:
     """Check valid open insider company totals
 
@@ -1012,6 +1032,7 @@ def check_open_insider_company_totals(d_company_totals: Dict) -> str:
     return error
 
 
+@log_start_end(log=logger)
 def check_open_insider_screener(
     d_general: Dict,
     d_date: Dict,
@@ -1057,6 +1078,7 @@ def check_open_insider_screener(
     return error
 
 
+@log_start_end(log=logger)
 def get_open_insider_link(preset_loaded: str) -> str:
     """Get open insider link
 
@@ -1093,7 +1115,7 @@ def get_open_insider_link(preset_loaded: str) -> str:
     )
 
     if result:
-        print(result)
+        console.print(result)
         return ""
 
     d_FilingTradingDate = {
@@ -1225,6 +1247,7 @@ def get_open_insider_link(preset_loaded: str) -> str:
     return link
 
 
+@log_start_end(log=logger)
 def get_open_insider_data(url: str, has_company_name: bool) -> pd.DataFrame:
     """Get open insider link
 
@@ -1243,7 +1266,7 @@ def get_open_insider_data(url: str, has_company_name: bool) -> pd.DataFrame:
     text_soup_open_insider = BeautifulSoup(requests.get(url).text, "lxml")
 
     if len(text_soup_open_insider.find_all("tbody")) == 0:
-        print("No insider trading found.")
+        console.print("No insider trading found.")
         return pd.DataFrame()
 
     l_filing_link = []

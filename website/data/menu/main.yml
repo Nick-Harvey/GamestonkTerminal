@@ -16,8 +16,6 @@ main:
       - name: discovery
         ref: "/stocks/discovery"
         sub:
-          - name: rtearn
-            ref: "/stocks/discovery/rtearn"
           - name: pipo
             ref: "/stocks/discovery/pipo"
           - name: fipo
@@ -54,6 +52,8 @@ main:
             ref: "/stocks/discovery/fds"
           - name: rtat
             ref: "/stocks/discovery/rtat"
+          - name: divcal
+            ref: "/stocks/discovery/divcal"
       - name: Sector and Industry Analysis (SIA)
         ref: "/stocks/sia"
         sub:
@@ -84,7 +84,7 @@ main:
           - name: sama
             ref: "/stocks/sia/sama"
           - name: metric
-            ref: "/stocks/sia/metric"            
+            ref: "/stocks/sia/metric"
       - name: dark pool shorts
         ref: "/stocks/dark_pool_shorts"
         sub:
@@ -381,6 +381,8 @@ main:
       - name: backtesting
         ref: "/stocks/backtesting"
         sub:
+          - name: whatif
+            ref: "/stocks/backtesting/whatif"
           - name: ema
             ref: "/stocks/backtesting/ema"
           - name: ema_cross
@@ -418,12 +420,16 @@ main:
             ref: "/stocks/options/hist"
           - name: grhist
             ref: "/stocks/options/grhist"
+          - name: vsurf
+            ref: "/stocks/options/vsurf"
           - name: portfolio optimization
             ref: "/portfolio/portfolio_optimization"
           - name: parity
             ref: "/stocks/options/parity"
           - name: binom
             ref: "/stocks/options/binom"
+          - name: greeks
+            ref: "/stocks/options/greeks"
           - name: payoff
             ref: "/stocks/options/payoff"
             sub:
@@ -451,6 +457,8 @@ main:
         sub:
           - name: view
             ref: "/common/technical_analysis/view"
+          - name: tv
+            ref: "/common/technical_analysis/tv"
           - name: summary
             ref: "/common/technical_analysis/summary"
           - name: recom
@@ -536,16 +544,10 @@ main:
             ref: "/common/behavioural_analysis/queries"
           - name: rise
             ref: "/common/behavioural_analysis/rise"
-          - name: popularsi
-            ref: "/common/behavioural_analysis/popularsi"
-          - name: emerging
-            ref: "/common/behavioural_analysis/emerging"
-          - name: metrics
-            ref: "/common/behavioural_analysis/metrics"
-          - name: social
-            ref: "/common/behavioural_analysis/social"
-          - name: historical
-            ref: "/common/behavioural_analysis/historical"
+          - name: hist
+            ref: "/common/behavioural_analysis/hist"
+          - name: trend
+            ref: "/common/behavioural_analysis/trend"
       - name: quantitative analysis
         ref: "/common/quantitative_analysis"
         sub:
@@ -587,6 +589,8 @@ main:
             ref: "/common/quantitative_analysis/capm"
           - name: data
             ref: "/common/quantitative_analysis/data"
+          - name: line
+            ref: "/common/quantitative_analysis/line"
       - name: prediction techniques
         ref: "/common/prediction_techniques"
         sub:
@@ -608,7 +612,6 @@ main:
             ref: "/common/prediction_techniques/conv1d"
           - name: mc
             ref: "/common/prediction_techniques/mc"
-
   - name: cryptocurrency
     ref: "/cryptocurrency"
     sub:
@@ -620,35 +623,27 @@ main:
         ref: "/cryptocurrency/find"
       - name: headlines
         ref: "/cryptocurrency/headlines"
+      - name: prt
+        ref: "/cryptocurrency/prt"
       - name: discovery
         ref: "/cryptocurrency/discovery"
         sub:
-          - name: coins
-            ref: "/cryptocurrency/discovery/coins"
           - name: cgtrending
             ref: "/cryptocurrency/discovery/cgtrending"
-          - name: cgvoted
-            ref: "/cryptocurrency/discovery/cgvoted"
-          - name: cgvisited
-            ref: "/cryptocurrency/discovery/cgvisited"
-          - name: cgvolume
-            ref: "/cryptocurrency/discovery/cgvolume"
-          - name: cgrecently
-            ref: "/cryptocurrency/discovery/cgrecently"
-          - name: cgsentiment
-            ref: "/cryptocurrency/discovery/cgsentiment"
+          - name: drnft
+            ref: "/cryptocurrency/discovery/drnft"
+          - name: drdex
+            ref: "/cryptocurrency/discovery/drdex"
+          - name: drdapps
+            ref: "/cryptocurrency/discovery/drdapps"
+          - name: drgames
+            ref: "/cryptocurrency/discovery/drgames"
           - name: cggainers
             ref: "/cryptocurrency/discovery/cggainers"
           - name: cglosers
             ref: "/cryptocurrency/discovery/cglosers"
-          - name: cgyfarms
-            ref: "/cryptocurrency/discovery/cgyfarms"
-          - name: cgdefi
-            ref: "/cryptocurrency/discovery/cgdefi"
-          - name: cgdex
-            ref: "/cryptocurrency/discovery/cgdex"
-          - name: cgnft
-            ref: "/cryptocurrency/discovery/cgnft"
+          - name: cgtop
+            ref: "/cryptocurrency/discovery/cgtop"
           - name: cpsearch
             ref: "/cryptocurrency/discovery/cpsearch"
           - name: cmctop
@@ -656,6 +651,10 @@ main:
       - name: overview
         ref: "/cryptocurrency/overview"
         sub:
+          - name: ch
+            ref: "/cryptocurrency/overview/ch"
+          - name: btcrb
+            ref: "/cryptocurrency/overview/btcrb"
           - name: cgglobal
             ref: "/cryptocurrency/overview/cgglobal"
           - name: cgnews
@@ -664,10 +663,6 @@ main:
             ref: "/cryptocurrency/overview/cgdefi"
           - name: cgstables
             ref: "/cryptocurrency/overview/cgstables"
-          - name: cgnft
-            ref: "/cryptocurrency/overview/cgnft"
-          - name: cgnftday
-            ref: "/cryptocurrency/overview/cgnftday"
           - name: cgexchanges
             ref: "/cryptocurrency/overview/cgexchanges"
           - name: cgexrates
@@ -684,8 +679,6 @@ main:
             ref: "/cryptocurrency/overview/cgcategories"
           - name: cghold
             ref: "/cryptocurrency/overview/cghold"
-          - name: cgcompanies
-            ref: "/cryptocurrency/overview/cgcompanies"
           - name: cpglobal
             ref: "/cryptocurrency/overview/cpglobal"
           - name: cpinfo
@@ -710,6 +703,8 @@ main:
             ref: "/cryptocurrency/overview/ewf"
           - name: wfpe
             ref: "/cryptocurrency/overview/wfpe"
+          - name: altindex
+            ref: "/cryptocurrency/overview/altindex"
       - name: due diligence
         ref: "/cryptocurrency/due_diligence"
         sub:
@@ -739,8 +734,6 @@ main:
             ref: "/cryptocurrency/due_diligence/dev"
           - name: bc
             ref: "/cryptocurrency/due_diligence/bc"
-          - name: chart
-            ref: "/cryptocurrency/due_diligence/chart"
           - name: basic
             ref: "/cryptocurrency/due_diligence/basic"
           - name: ps
@@ -764,8 +757,46 @@ main:
       - name: onchain
         ref: "/cryptocurrency/onchain"
         sub:
+          - name: btccp
+            ref: "/cryptocurrency/onchain/btccp"
+          - name: btcct
+            ref: "/cryptocurrency/onchain/btcct"
           - name: gwei
             ref: "/cryptocurrency/onchain/gwei"
+          - name: hr
+            ref: "/cryptocurrency/onchain/hr"
+          - name: address
+            ref: "/cryptocurrency/onchain/address"
+          - name: balance
+            ref: "/cryptocurrency/onchain/balance"
+          - name: hist
+            ref: "/cryptocurrency/onchain/hist"
+          - name: holders
+            ref: "/cryptocurrency/onchain/holders"
+          - name: info
+            ref: "/cryptocurrency/onchain/info"
+          - name: ttcp
+            ref: "/cryptocurrency/onchain/ttcp"
+          - name: prices
+            ref: "/cryptocurrency/onchain/prices"
+          - name: ueat
+            ref: "/cryptocurrency/onchain/ueat"
+          - name: baas
+            ref: "/cryptocurrency/onchain/baas"
+          - name: th
+            ref: "/cryptocurrency/onchain/th"
+          - name: top
+            ref: "/cryptocurrency/onchain/top"
+          - name: lt
+            ref: "/cryptocurrency/onchain/lt"
+          - name: tx
+            ref: "/cryptocurrency/onchain/tx"
+          - name: dvcp
+            ref: "/cryptocurrency/onchain/dvcp"
+          - name: tv
+            ref: "/cryptocurrency/onchain/tv"
+          - name: whales
+            ref: "/cryptocurrency/onchain/whales"
       - name: nft
         ref: "/cryptocurrency/nft"
         sub:
@@ -822,6 +853,58 @@ main:
             ref: "/common/technical_analysis/obv"
           - name: fib
             ref: "/common/technical_analysis/fib"
+      - name: defi
+        ref: "/cryptocurrency/defi"
+        sub:
+          - name: ldapps
+            ref: "/cryptocurrency/defi/ldapps"
+          - name: gdapps
+            ref: "/cryptocurrency/defi/gdapps"
+          - name: dtvl
+            ref: "/cryptocurrency/defi/dtvl"
+          - name: stvl
+            ref: "/cryptocurrency/defi/stvl"
+          - name: ayr
+            ref: "/cryptocurrency/defi/ayr"
+          - name: aterra
+            ref: "/cryptocurrency/defi/aterra"
+          - name: newsletter
+            ref: "/cryptocurrency/defi/newsletter"
+          - name: dpi
+            ref: "/cryptocurrency/defi/dpi"
+          - name: funding
+            ref: "/cryptocurrency/defi/funding"
+          - name: borrow
+            ref: "/cryptocurrency/defi/borrow"
+          - name: lending
+            ref: "/cryptocurrency/defi/lending"
+          - name: vaults
+            ref: "/cryptocurrency/defi/vaults"
+          - name: tokens
+            ref: "/cryptocurrency/defi/tokens"
+          - name: stats
+            ref: "/cryptocurrency/defi/stats"
+          - name: pairs
+            ref: "/cryptocurrency/defi/pairs"
+          - name: pools
+            ref: "/cryptocurrency/defi/pools"
+          - name: swaps
+            ref: "/cryptocurrency/defi/swaps"
+          - name: sinfo
+            ref: "/cryptocurrency/defi/sinfo"
+          - name: govp
+            ref: "/cryptocurrency/defi/govp"
+          - name: gacc
+            ref: "/cryptocurrency/defi/gacc"
+          - name: validators
+            ref: "/cryptocurrency/defi/validators"
+          - name: sratio
+            ref: "/cryptocurrency/defi/sratio"
+          - name: sreturn
+            ref: "/cryptocurrency/defi/sreturn"
+          - name: lcsc
+            ref: "/cryptocurrency/defi/lcsc"
+
   - name: economy
     ref: "/economy"
     sub:
@@ -879,36 +962,94 @@ main:
         ref: "/economy/fred"
         sub:
           - name: search
-            ref : "/economy/fred/search"
+            ref: "/economy/fred/search"
           - name: add
             ref: "/economy/fred/add"
           - name: rmv
             ref: "/economy/fred/rmv"
           - name: plot
             ref: "/economy/fred/plot"
+          - name: prediction techniques
+            ref: "/common/prediction_techniques"
+            sub:
+              - name: ets
+                ref: "/common/prediction_techniques/ets"
+              - name: knn
+                ref: "/common/prediction_techniques/knn"
+              - name: regression
+                ref: "/common/prediction_techniques/regression"
+              - name: arima
+                ref: "/common/prediction_techniques/arima"
+              - name: mlp
+                ref: "/common/prediction_techniques/mlp"
+              - name: rnn
+                ref: "/common/prediction_techniques/rnn"
+              - name: lstm
+                ref: "/common/prediction_techniques/lstm"
+              - name: conv1d
+                ref: "/common/prediction_techniques/conv1d"
+              - name: mc
+                ref: "/common/prediction_techniques/mc"
   - name: etf
     ref: "/etf"
     sub:
-      - name: search
-        ref: "/etf/search"
+      - name: ln
+        ref: "/etf/ln"
+      - name: ld
+        ref: "/etf/ld"
       - name: overview
         ref: "/etf/overview"
       - name: holdings
         ref: "/etf/holdings"
-      - name: compare
-        ref: "/etf/compare"
-      - name: screener
-        ref: "/etf/screener"
-      - name: gainers
-        ref: "/etf/gainers"
-      - name: decliners
-        ref: "/etf/decliners"
-      - name: active
-        ref: "/etf/active"
+      - name: weights
+        ref: "/etf/weights"
+      - name: summary
+        ref: "/etf/summary"
+      - name: candle
+        ref: "/etf/candle"
+      - name: news
+        ref: "/etf/news"
+      - name: disc
+        ref: "/etf/disc"
+        sub:
+          - name: gainers
+            ref: "/etf/disc/gainers"
+          - name: decliners
+            ref: "/etf/disc/decliners"
+          - name: active
+            ref: "/etf/disc/active"
+      - name: scr
+        ref: "/etf/scr"
+        sub:
+          - name: view
+            ref: "/etf/scr/view"
+          - name: set
+            ref: "/etf/scr/set"
+          - name: screen
+            ref: "/etf/scr/screen"
+          - name: sbc
+            ref: "/etf/scr/sbc"
       - name: pir
         ref: "/etf/pir"
-      - name: fds
-        ref: "/etf/fds"
+      - name: compare
+        ref: "/etf/compare"
+  - name: funds
+    ref: "/funds"
+    sub:
+      - name: search
+        ref: "/funds/search"
+      - name: country
+        ref: "/funds/country"
+      - name: info
+        ref: "/funds/info"
+      - name: load
+        ref: "/funds/load"
+      - name: overview
+        ref: "/funds/overview"
+      - name: plot
+        ref: "/funds/plot"
+      - name: sector
+        ref: "/funds/sector"
   - name: portfolio
     ref: "/portfolio"
     sub:
@@ -946,8 +1087,6 @@ main:
                 ref: "/portfolio/brokers/robinhood/history"
               - name: holdings
                 ref: "/portfolio/brokers/robinhood/holdings"
-      - name: portfolio analysis
-        ref: "/portfolio/portfolio_analysis"
       - name: portfolio optimization
         ref: "/portfolio/portfolio_optimization"
         sub:
@@ -977,6 +1116,26 @@ main:
             ref: "/portfolio/portfolio_optimization/effrisk"
           - name: ef
             ref: "/portfolio/portfolio_optimization/ef"
+      - name: load
+        ref: "/portfolio/load"
+      - name: save
+        ref: "/portfolio/save"
+      - name: show
+        ref: "/portfolio/show"
+      - name: add
+        ref: "/portfolio/add"
+      - name: ar
+        ref: "/portfolio/ar"
+      - name: rmr
+        ref: "/portfolio/rmr"
+      - name: mdd
+        ref: "portfolio/dd"
+      - name: build
+        ref: "portfolio/build"
+      - name: init
+        ref: "portfolio/init"
+      - name: rolling
+        ref: "portfolio/rolling"
   - name: forex
     ref: "/forex"
     sub:
@@ -988,3 +1147,117 @@ main:
         ref: "/forex/candle"
   - name: resources
     ref: "/resources"
+  - name: alternative
+    ref: "/alternative"
+    sub:
+      - name: covid
+        ref: "/alternative/covid"
+        sub:
+          - name: slopes
+            ref: "/alternative/covid/slopes"
+          - name: ov
+            ref: "/alternative/covid/ov"
+          - name: deaths
+            ref: "/alternative/covid/deaths"
+          - name: cases
+            ref: "/alternative/covid/cases"
+          - name: rates
+            ref: "/alternative/covid/rates"
+  - name: custom
+    ref: "/custom"
+    sub:
+      - name: load
+        ref: "/custom/load"
+      - name: show
+        ref: "/custom/show"
+      - name: info
+        ref: "/custom/info"
+      - name: plot
+        ref: "/custom/plot"
+      - name: quantitative analysis
+        ref: "/common/quantitative_analysis"
+        sub:
+          - name: load
+            ref: "/common/quantitative_analysis/load"
+          - name: pick
+            ref: "/common/quantitative_analysis/pick"
+          - name: summary
+            ref: "/common/quantitative_analysis/summary"
+          - name: normality
+            ref: "/common/quantitative_analysis/normality"
+          - name: unitroot
+            ref: "/common/quantitative_analysis/unitroot"
+          - name: hist
+            ref: "/common/quantitative_analysis/hist"
+          - name: cdf
+            ref: "/common/quantitative_analysis/cdf"
+          - name: bw
+            ref: "/common/quantitative_analysis/bw"
+          - name: acf
+            ref: "/common/quantitative_analysis/acf"
+          - name: qqplot
+            ref: "/common/quantitative_analysis/qqplot"
+          - name: rolling
+            ref: "/common/quantitative_analysis/rolling"
+          - name: spread
+            ref: "/common/quantitative_analysis/spread"
+          - name: quantile
+            ref: "/common/quantitative_analysis/quantile"
+          - name: skew
+            ref: "/common/quantitative_analysis/skew"
+          - name: kurtosis
+            ref: "/common/quantitative_analysis/kurtosis"
+          - name: decompose
+            ref: "/common/quantitative_analysis/decompose"
+          - name: cusum
+            ref: "/common/quantitative_analysis/cusum"
+          - name: capm
+            ref: "/common/quantitative_analysis/capm"
+          - name: data
+            ref: "/common/quantitative_analysis/data"
+          - name: line
+            ref: "/common/quantitative_analysis/line"
+      - name: prediction techniques
+        ref: "/common/prediction_techniques"
+        sub:
+          - name: ets
+            ref: "/common/prediction_techniques/ets"
+          - name: knn
+            ref: "/common/prediction_techniques/knn"
+          - name: regression
+            ref: "/common/prediction_techniques/regression"
+          - name: arima
+            ref: "/common/prediction_techniques/arima"
+          - name: mlp
+            ref: "/common/prediction_techniques/mlp"
+          - name: rnn
+            ref: "/common/prediction_techniques/rnn"
+          - name: lstm
+            ref: "/common/prediction_techniques/lstm"
+          - name: conv1d
+            ref: "/common/prediction_techniques/conv1d"
+          - name: mc
+            ref: "/common/prediction_techniques/mc"
+  - name: jupyter
+    ref: "/jupyter"
+    sub:
+      - name: "dashboards"
+        ref: "/jupyter/dashboards"
+        sub:
+          - name: "stocks"
+            ref: "/jupyter/dashboards/stocks"
+          - name: "correlation"
+            ref: "/jupyter/dashboards/correlations"
+          - name: "vsurf"
+            ref: "/jupyter/dashboards/vsurf"
+          - name: "chains"
+            ref: "/jupyter/dashboards/chains"
+          - name: "shortdata"
+            ref: "jupyter/dashboards/shortdata"
+      - name: "reports"
+        ref: "/jupyter/reports"
+  - name: bot
+    ref: "/bot"
+    sub:
+      - name: "discord"
+        ref: "/bot/discord"

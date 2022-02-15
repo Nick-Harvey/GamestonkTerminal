@@ -1,14 +1,20 @@
 """Finnhub View"""
 __docformat__ = "numpy"
 
+import logging
 import os
 
 import pandas as pd
 
-from gamestonk_terminal.helper_funcs import export_data
 from gamestonk_terminal.common.behavioural_analysis import finnhub_model
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_sentiment_stats(ticker: str, export: str = ""):
     """
     Sentiment stats which displays buzz, news score, articles last week, articles weekly average,
@@ -24,7 +30,7 @@ def display_sentiment_stats(ticker: str, export: str = ""):
     d_stats = finnhub_model.get_sentiment_stats(ticker)
 
     if d_stats:
-        print(
+        console.print(
             f"""
 Buzz: {round(100*d_stats['buzz']['buzz'],2)} %
 News Score: {round(100*d_stats['companyNewsScore'],2)} %
@@ -46,5 +52,5 @@ Sector Average News Score: {round(100*d_stats['sectorAverageNewsScore'],2)} %"""
         )
 
     else:
-        print("No sentiment stats found.")
-    print("")
+        console.print("No sentiment stats found.")
+    console.print("")

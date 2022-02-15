@@ -1,20 +1,33 @@
 """NASDAQ Data Link View"""
 __docformat__ = "numpy"
 
-from typing import List
+import logging
 import os
+from typing import List, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from tabulate import tabulate
-from gamestonk_terminal import feature_flags as gtff
-from gamestonk_terminal.economy import nasdaq_model
-from gamestonk_terminal.helper_funcs import export_data, plot_autoscale
+
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.economy import nasdaq_model
+from gamestonk_terminal.helper_funcs import (
+    export_data,
+    plot_autoscale,
+    print_rich_table,
+)
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def display_big_mac_index(
-    country_codes: List[str], raw: bool = False, export: str = ""
+    country_codes: List[str],
+    raw: bool = False,
+    export: str = "",
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Display Big Mac Index for given countries
 
@@ -26,31 +39,46 @@ def display_big_mac_index(
         Flag to display raw data, by default False
     export : str, optional
         Format data, by default ""
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (3 axes are expected in the list), by default None
     """
     df_cols = ["Date"]
     df_cols.extend(country_codes)
     big_mac = pd.DataFrame(columns=df_cols)
     for country in country_codes:
         df1 = nasdaq_model.get_big_mac_index(country)
-        big_mac[country] = df1["dollar_price"]
-        big_mac["Date"] = df1["Date"]
+        if not df1.empty:
+            big_mac[country] = df1["dollar_price"]
+            big_mac["Date"] = df1["Date"]
     big_mac.set_index("Date", inplace=True)
-    fig, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-    big_mac.plot(ax=ax, marker="o")
-    ax.legend(bbox_to_anchor=(1, 1))
-    ax.set_title("Big Mac Index (USD)")
-    ax.set_ylabel("Price of Big Mac in USD")
-    ax.grid("on")
-    if gtff.USE_ION:
-        plt.ion()
-    fig.tight_layout()
-    plt.show()
 
-    if raw:
-        if gtff.USE_TABULATE_DF:
-            print(tabulate(big_mac, headers=big_mac.columns, tablefmt="fancy_grid"))
+    if not big_mac.empty:
+        if external_axes is None:
+            _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+
         else:
-            print(big_mac.head(20).to_string())
+            if len(external_axes) != 3:
+                console.print("[red]Expected list of 3 axis items./n[/red]")
+                return
+            (ax,) = external_axes
 
-    export_data(export, os.path.dirname(os.path.abspath(__file__)), "bigmac", big_mac)
-    print("")
+        big_mac.plot(ax=ax, marker="o")
+        ax.legend()
+        ax.set_title("Big Mac Index (USD)")
+        ax.set_ylabel("Price of Big Mac in USD")
+        theme.style_primary_axis(ax)
+        if external_axes is None:
+            theme.visualize_output()
+
+        if raw:
+            print_rich_table(
+                big_mac, headers=list(big_mac.columns), title="Big Mac Index"
+            )
+            console.print("")
+
+        export_data(
+            export, os.path.dirname(os.path.abspath(__file__)), "bigmac", big_mac
+        )
+        console.print("")
+    else:
+        console.print("[red]Unable to get big mac data[/red]\n")

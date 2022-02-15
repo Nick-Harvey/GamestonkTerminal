@@ -1,21 +1,30 @@
 """CoinGecko model"""
 __docformat__ = "numpy"
 
-from typing import Tuple, Union, Any, Dict, List, Optional
-import regex as re
+import logging
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import pandas as pd
+import regex as re
 from pycoingecko import CoinGeckoAPI
-from gamestonk_terminal.cryptocurrency.pycoingecko_helpers import (
-    remove_keys,
-    filter_list,
-    find_discord,
-    rename_columns_in_dct,
-    create_dictionary_with_prefixes,
-    DENOMINATION,
-)
+
 from gamestonk_terminal.cryptocurrency.dataframe_helpers import (
     replace_underscores_in_column_names,
 )
+from gamestonk_terminal.cryptocurrency.discovery.pycoingecko_model import read_file_data
+from gamestonk_terminal.cryptocurrency.pycoingecko_helpers import (
+    DENOMINATION,
+    calc_change,
+    create_dictionary_with_prefixes,
+    filter_list,
+    find_discord,
+    remove_keys,
+    rename_columns_in_dct,
+)
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 CHANNELS = {
     "telegram_channel_identifier": "telegram",
@@ -38,20 +47,212 @@ BASE_INFO = [
 ]
 
 
+@log_start_end(log=logger)
+def get_coin_potential_returns(
+    main_coin: str,
+    vs: Union[str, None] = None,
+    top: Union[int, None] = None,
+    price: Union[int, None] = None,
+) -> pd.DataFrame:
+    """Fetch data to calculate potential returns of a certain coin. [Source: CoinGecko]
+
+    Parameters
+    ----------
+    main_coin   : str
+        Coin loaded to check potential returns for (e.g., algorand)
+    vs          : str | None
+        Coin to compare main_coin with (e.g., bitcoin)
+    top         : int | None
+        Number of coins with highest market cap to compare main_coin with (e.g., 5)
+    price
+        Target price of main_coin to check potential returns (e.g., 5)
+
+    Returns
+    -------
+    pd.DataFrame
+            Potential returns data
+            Columns: Coin, Current Price, Target Coin, Potential Price, Potential Market Cap ($), Change (%)
+    """
+    client = CoinGeckoAPI()
+    COLUMNS = [
+        "Coin",
+        "Current Price ($)",
+        "Current Market Cap ($)",
+        "Target Coin",
+        "Potential Price ($)",
+        "Potential Market Cap ($)",
+        "Change (%)",
+    ]
+    if top and top > 0:  # user wants to compare with top coins
+        data = client.get_price(
+            ids=f"{main_coin}",
+            vs_currencies="usd",
+            include_market_cap=True,
+            include_24hr_vol=False,
+            include_24hr_change=False,
+            include_last_updated_at=False,
+        )
+        top_coins_data = client.get_coins_markets(
+            vs_currency="usd", per_page=top, order="market_cap_desc"
+        )
+        main_coin_data = data[main_coin]
+        diff_arr = []
+        for coin in top_coins_data:
+            market_cap_difference_percentage = calc_change(
+                coin["market_cap"], main_coin_data["usd_market_cap"]
+            )
+            future_price = main_coin_data["usd"] * (
+                1 + market_cap_difference_percentage / 100
+            )
+            diff_arr.append(
+                [
+                    main_coin,
+                    main_coin_data["usd"],
+                    main_coin_data["usd_market_cap"],
+                    coin["id"],
+                    future_price,
+                    coin["market_cap"],
+                    market_cap_difference_percentage,
+                ]
+            )
+        return pd.DataFrame(
+            data=diff_arr,
+            columns=COLUMNS,
+        )
+
+    if vs:  # user passed a coin
+        data = client.get_price(
+            ids=f"{main_coin},{vs}",
+            vs_currencies="usd",
+            include_market_cap=True,
+            include_24hr_vol=False,
+            include_24hr_change=False,
+            include_last_updated_at=False,
+        )
+        main_coin_data = data[main_coin]
+        vs_coin_data = data[vs]
+
+        if main_coin_data and vs_coin_data:
+            market_cap_difference_percentage = calc_change(
+                vs_coin_data["usd_market_cap"], main_coin_data["usd_market_cap"]
+            )
+            future_price = main_coin_data["usd"] * (
+                1 + market_cap_difference_percentage / 100
+            )
+            return pd.DataFrame(
+                data=[
+                    [
+                        main_coin,
+                        main_coin_data["usd"],
+                        main_coin_data["usd_market_cap"],
+                        vs,
+                        future_price,
+                        vs_coin_data["usd_market_cap"],
+                        market_cap_difference_percentage,
+                    ]
+                ],
+                columns=COLUMNS,
+            )
+
+    if price and price > 0:  # user passed a price
+        data = client.get_price(
+            ids=main_coin,
+            vs_currencies="usd",
+            include_market_cap=True,
+            include_24hr_vol=False,
+            include_24hr_change=False,
+            include_last_updated_at=False,
+        )
+        main_coin_data = data[main_coin]
+        if main_coin_data:
+            final_market_cap = (
+                main_coin_data["usd_market_cap"] * price / main_coin_data["usd"]
+            )
+            market_cap_difference_percentage = calc_change(
+                final_market_cap, main_coin_data["usd_market_cap"]
+            )
+            future_price = main_coin_data["usd"] * (
+                1 + market_cap_difference_percentage / 100
+            )
+            return pd.DataFrame(
+                data=[
+                    [
+                        main_coin,
+                        main_coin_data["usd"],
+                        main_coin_data["usd_market_cap"],
+                        "",
+                        future_price,
+                        final_market_cap,
+                        market_cap_difference_percentage,
+                    ]
+                ],
+                columns=COLUMNS,
+            )
+
+    return pd.DataFrame()
+
+
+@log_start_end(log=logger)
+def check_coin(coin_id: str):
+    coins = read_file_data("coingecko_coins.json")
+    for coin in coins:
+        if coin["id"] == coin_id:
+            return coin["id"]
+        if coin["symbol"] == coin_id:
+            return coin["id"]
+    return None
+
+
+@log_start_end(log=logger)
+def get_coin_market_chart(
+    coin_id: str = "", vs_currency: str = "usd", days: int = 30, **kwargs: Any
+) -> pd.DataFrame:
+    """Get prices for given coin. [Source: CoinGecko]
+
+    Parameters
+    ----------
+    vs_currency: str
+        currency vs which display data
+    days: int
+        number of days to display the data
+    kwargs
+
+    Returns
+    -------
+    pandas.DataFrame
+        Prices for given coin
+        Columns: time, price, currency
+    """
+    client = CoinGeckoAPI()
+    prices = client.get_coin_market_chart_by_id(coin_id, vs_currency, days, **kwargs)
+    prices = prices["prices"]
+    df = pd.DataFrame(data=prices, columns=["time", "price"])
+    df["time"] = pd.to_datetime(df.time, unit="ms")
+    df = df.set_index("time")
+    df["currency"] = vs_currency
+    return df
+
+
 class Coin:
     """Coin class, it holds loaded coin"""
 
-    def __init__(self, symbol: str):
+    @log_start_end(log=logger)
+    def __init__(self, symbol: str, load_from_api: bool = False):
         self.client = CoinGeckoAPI()
-        self._coin_list = self.client.get_coins_list()
+        if load_from_api:
+            self._coin_list = self.client.get_coins_list()
+        else:
+            self._coin_list = read_file_data("coingecko_coins.json")
         self.coin_symbol, self.symbol = self._validate_coin(symbol)
 
         if self.coin_symbol:
             self.coin: Dict[Any, Any] = self._get_coin_info()
 
+    @log_start_end(log=logger)
     def __str__(self):
         return f"{self.coin_symbol}"
 
+    @log_start_end(log=logger)
     def _validate_coin(self, search_coin: str) -> Tuple[Optional[Any], Optional[Any]]:
         """Validate if given coin symbol or id exists in list of available coins on CoinGecko.
         If yes it returns coin id. [Source: CoinGecko]
@@ -71,15 +272,16 @@ class Coin:
         coin = None
         symbol = None
         for dct in self._coin_list:
-            if search_coin.lower() in list(dct.values()):
+            if search_coin.lower() in [
+                dct["id"],
+                dct["symbol"],
+            ]:
                 coin = dct.get("id")
                 symbol = dct.get("symbol")
-                print(f"Coin found : {coin} with symbol {symbol}\n")
-                break
-        if not coin:
-            raise ValueError(f"Could not find coin with the given id: {symbol}\n")
-        return coin, symbol
+                return coin, symbol
+        raise ValueError(f"Could not find coin with the given id: {search_coin}\n")
 
+    @log_start_end(log=logger)
     def coin_list(self) -> list:
         """List all available coins [Source: CoinGecko]
 
@@ -91,6 +293,7 @@ class Coin:
 
         return [token.get("id") for token in self._coin_list]
 
+    @log_start_end(log=logger)
     def _get_coin_info(self) -> dict:
         """Helper method which fetch the coin information by id from CoinGecko API like:
          (name, price, market, ... including exchange tickers) [Source: CoinGecko]
@@ -104,6 +307,7 @@ class Coin:
         params = dict(localization="false", tickers="false", sparkline=True)
         return self.client.get_coin_by_id(self.coin_symbol, **params)
 
+    @log_start_end(log=logger)
     def _get_links(self) -> Dict:
         """Helper method that extracts links from coin [Source: CoinGecko]
 
@@ -115,7 +319,7 @@ class Coin:
 
         return self.coin.get("links", {})
 
-    @property
+    @log_start_end(log=logger)
     def get_repositories(self) -> Optional[Any]:
         """Get list of all repositories for given coin [Source: CoinGecko]
 
@@ -127,7 +331,7 @@ class Coin:
 
         return self._get_links().get("repos_url")
 
-    @property
+    @log_start_end(log=logger)
     def get_developers_data(self) -> pd.DataFrame:
         """Get coin development data from GitHub or BitBucket like:
             number of pull requests, contributor etc [Source: CoinGecko]
@@ -155,7 +359,7 @@ class Coin:
 
         return df[df["Value"].notna()]
 
-    @property
+    @log_start_end(log=logger)
     def get_blockchain_explorers(self) -> Union[pd.DataFrame, Any]:
         """Get list of URLs to blockchain explorers for given coin. [Source: CoinGecko]
 
@@ -179,7 +383,7 @@ class Coin:
             return df[df["Value"].notna()]
         return None
 
-    @property
+    @log_start_end(log=logger)
     def get_social_media(self) -> pd.DataFrame:
         """Get list of URLs to social media like twitter, facebook, reddit... [Source: CoinGecko]
 
@@ -213,7 +417,7 @@ class Coin:
         )
         return df[df["Value"].notna()]
 
-    @property
+    @log_start_end(log=logger)
     def get_websites(self) -> pd.DataFrame:
         """Get list of URLs to websites like homepage of coin, forum. [Source: CoinGecko]
 
@@ -239,7 +443,7 @@ class Coin:
         )
         return df[df["Value"].notna()]
 
-    @property
+    @log_start_end(log=logging)
     def get_categories(self) -> Union[Dict[Any, Any], List[Any]]:
         """Coins categories. [Source: CoinGecko]
 
@@ -251,6 +455,7 @@ class Coin:
 
         return self.coin.get("categories", {})
 
+    @log_start_end(log=logger)
     def _get_base_market_data_info(self) -> dict:
         """Helper method that fetches all the base market/price information about given coin. [Source: CoinGecko]
 
@@ -276,7 +481,7 @@ class Coin:
         market_dct.update(prices)
         return market_dct
 
-    @property
+    @log_start_end(log=logger)
     def get_base_info(self) -> pd.DataFrame:
         """Get all the base information about given coin. [Source: CoinGecko]
 
@@ -307,7 +512,7 @@ class Coin:
 
         return df[df["Value"].notna()]
 
-    @property
+    @log_start_end(log=logger)
     def get_market_data(self) -> pd.DataFrame:
         """Get all the base market information about given coin. [Source: CoinGecko]
 
@@ -352,7 +557,7 @@ class Coin:
                 single_stats["circulating_supply"] / single_stats["total_supply"]
             )
         except (ZeroDivisionError, TypeError) as e:
-            print(e)
+            console.print(e)
         df = pd.Series(single_stats).to_frame().reset_index()
         df.columns = ["Metric", "Value"]
         df["Metric"] = df["Metric"].apply(
@@ -362,6 +567,7 @@ class Coin:
         )
         return df[df["Value"].notna()]
 
+    @log_start_end(log=logger)
     def get_all_time_high(self, currency: str = "usd") -> pd.DataFrame:
         """Get all time high data for given coin. [Source: CoinGecko]
 
@@ -397,6 +603,7 @@ class Coin:
         df["Metric"] = df["Metric"] + f" {currency.upper()}"
         return df[df["Value"].notna()]
 
+    @log_start_end(log=logger)
     def get_all_time_low(self, currency: str = "usd") -> pd.DataFrame:
         """Get all time low data for given coin. [Source: CoinGecko]
 
@@ -432,7 +639,7 @@ class Coin:
         df["Metric"] = df["Metric"] + f" {currency.upper()}"
         return df[df["Value"].notna()]
 
-    @property
+    @log_start_end(log=logger)
     def get_scores(self) -> pd.DataFrame:
         """Get different kind of scores for given coin. [Source: CoinGecko]
 
@@ -477,6 +684,7 @@ class Coin:
         )
         return df[df["Value"].notna()]
 
+    @log_start_end(log=logger)
     def get_coin_market_chart(
         self, vs_currency: str = "usd", days: int = 30, **kwargs: Any
     ) -> pd.DataFrame:
@@ -507,6 +715,7 @@ class Coin:
         df["currency"] = vs_currency
         return df
 
+    @log_start_end(log=logger)
     def get_ohlc(self, vs_currency: str = "usd", days: int = 90) -> pd.DataFrame:
         """Get Open, High, Low, Close prices for given coin. [Source: CoinGecko]
 

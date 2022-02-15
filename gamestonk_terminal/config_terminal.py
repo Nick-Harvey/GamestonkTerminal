@@ -1,19 +1,53 @@
 import os
+import dotenv
 
-from dotenv import load_dotenv
+from .helper_classes import TerminalStyle as _TerminalStyle
 
 env_files = [f for f in os.listdir() if f.endswith(".env")]
 if env_files:
-    load_dotenv(env_files[0])
+    dotenv.load_dotenv(env_files[0])
 
-# Choose one of: stocks, options, crypto, economy, etf, portfolio, forex
-DEFAULT_CONTEXT = ""
+# Terminal UX section
+theme = _TerminalStyle(
+    os.getenv("GT_MPLSTYLE") or "boring",
+    os.getenv("GT_MPFSTYLE") or "boring",
+    os.getenv("GT_RICHSTYLE") or "boring",
+)
 
 # Set to True to see full stack traces for debugging/error reporting
 DEBUG_MODE = False
 
 # By default the jupyter notebook will be run on port 8888
-PAPERMILL_NOTEBOOK_REPORT_PORT = "8888"
+PAPERMILL_NOTEBOOK_REPORT_PORT = (
+    "8888"  # This setting is deprecated and seems to be unused
+)
+
+# Logging section
+
+# Logging settings
+# 0 - INFO
+# 1 - DEBUG for terminal, INFO for libraries
+# 2 - DEBUG for terminal, DEBUG for libraries
+
+LOGGING_VERBOSITY = 0
+
+if tmp_verbosity := os.getenv("GT_LOGGING_VERBOSITY"):
+    print(f"Setting verbosity to {tmp_verbosity}")
+    try:
+        LOGGING_VERBOSITY = int(tmp_verbosity)
+    except ValueError:
+        LOGGING_VERBOSITY = 2
+
+# stdout, stderr, file, noop
+LOGGING_HANDLERS = os.getenv("GT_LOGGING_HANDLERS") or "file"
+
+LOGGING_ID = os.getenv("GT_LOGGING_ID") or None
+
+LOGGING_FILE = ""
+
+LOGGING_VERSION = os.getenv("GT_LOGGING_VERSION") or "ver:1.0.0"
+
+# API Keys section
 
 # https://www.alphavantage.co
 API_KEY_ALPHAVANTAGE = os.getenv("GT_API_KEY_ALPHAVANTAGE") or "REPLACE_ME"
@@ -57,9 +91,8 @@ DG_PASSWORD = os.getenv("GT_DG_PASSWORD") or "REPLACE_ME"
 DG_TOTP_SECRET = os.getenv("GT_DG_TOTP_SECRET") or None
 
 # https://developer.oanda.com
-OANDA_ACCOUNT_TYPE = (
-    os.getenv("GT_OANDA_ACCOUNT_TYPE") or "practice"
-)  # "live" or "practice"
+OANDA_ACCOUNT_TYPE = os.getenv("GT_OANDA_ACCOUNT_TYPE") or "REPLACE_ME"
+# "live" or "practice"
 OANDA_ACCOUNT = os.getenv("GT_OANDA_ACCOUNT") or "REPLACE_ME"
 OANDA_TOKEN = os.getenv("GT_OANDA_TOKEN") or "REPLACE_ME"
 
@@ -84,7 +117,6 @@ API_FINNHUB_KEY = os.getenv("GT_API_FINNHUB_KEY") or "REPLACE_ME"
 API_IEX_TOKEN = os.getenv("GT_API_IEX_KEY") or "REPLACE_ME"
 
 # https://www.sentimentinvestor.com
-API_SENTIMENTINVESTOR_KEY = os.getenv("GT_API_SENTIMENTINVESTOR_KEY") or "REPLACE_ME"
 API_SENTIMENTINVESTOR_TOKEN = (
     os.getenv("GT_API_SENTIMENTINVESTOR_TOKEN") or "REPLACE_ME"
 )
@@ -111,3 +143,10 @@ API_ETHPLORER_KEY = os.getenv("GT_API_ETHPLORER_KEY") or "freekey"
 
 # https://cryptopanic.com/developers/api/
 API_CRYPTO_PANIC_KEY = os.getenv("GT_API_CRYPTO_PANIC_KEY") or "REPLACE_ME"
+
+# https://bitquery.io/pricing
+API_BITQUERY_KEY = os.getenv("GT_API_BITQUERY_KEY") or "REPLACE_ME"
+
+# https://terra.smartstake.io/
+API_SMARTSTAKE_KEY = os.getenv("GT_API_SMARTSTAKE_KEY") or "REPLACE_ME"
+API_SMARTSTAKE_TOKEN = os.getenv("GT_API_SMARTSTAKE_TOKEN") or "REPLACE_ME"

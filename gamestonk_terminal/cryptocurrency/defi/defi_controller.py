@@ -1,18 +1,29 @@
 """Defi Controller Module"""
 __docformat__ = "numpy"
 
+# pylint: disable=C0302
+
 import argparse
+
 from typing import List
 from prompt_toolkit.completion import NestedCompleter
-
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.cryptocurrency.defi import (
+    graph_model,
+    coindix_model,
+    terraengineer_model,
+    terraengineer_view,
+    terramoney_fcd_view,
+    terramoney_fcd_model,
+    smartstake_view,
+)
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.menu import session
 from gamestonk_terminal.helper_funcs import (
-    get_flair,
     parse_known_args_and_warn,
     check_positive,
-    try_except,
-    system_clear,
+    check_terra_address_format,
     EXPORT_ONLY_RAW_DATA_ALLOWED,
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
 )
@@ -20,98 +31,432 @@ from gamestonk_terminal.helper_funcs import (
 from gamestonk_terminal.cryptocurrency.defi import (
     defirate_view,
     defipulse_view,
+    llama_model,
     llama_view,
     substack_view,
     graph_view,
+    coindix_view,
 )
 
 
-class DefiController:
+class DefiController(BaseController):
     """Defi Controller class"""
-
-    CHOICES = [
-        "cls",
-        "?",
-        "help",
-        "q",
-        "quit",
-    ]
 
     CHOICES_COMMANDS = [
         "dpi",
         "funding",
         "lending",
-        "tvl",
         "borrow",
-        "llama",
+        "ldapps",
+        "gdapps",
+        "stvl",
+        "dtvl",
         "newsletter",
         "tokens",
         "pairs",
         "pools",
         "swaps",
         "stats",
+        "vaults",
+        "ayr",
+        "aterra",
+        "sinfo",
+        "validators",
+        "govp",
+        "gacc",
+        "sratio",
+        "sreturn",
+        "lcsc",
     ]
 
-    CHOICES += CHOICES_COMMANDS
+    PATH = "/crypto/defi/"
 
-    def __init__(self):
+    def __init__(self, queue: List[str] = None):
         """Constructor"""
-        self.defi_parser = argparse.ArgumentParser(add_help=False, prog="defi")
-        self.defi_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
+        super().__init__(queue)
+
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            choices["ldapps"]["-s"] = {c: {} for c in llama_model.LLAMA_FILTERS}
+            choices["aterra"]["--asset"] = {c: {} for c in terraengineer_model.ASSETS}
+            choices["aterra"] = {c: {} for c in terraengineer_model.ASSETS}
+            choices["tokens"]["-s"] = {c: {} for c in graph_model.TOKENS_FILTERS}
+            choices["pairs"]["-s"] = {c: {} for c in graph_model.PAIRS_FILTERS}
+            choices["pools"]["-s"] = {c: {} for c in graph_model.POOLS_FILTERS}
+            choices["swaps"]["-s"] = {c: {} for c in graph_model.SWAPS_FILTERS}
+            choices["vaults"]["-s"] = {c: {} for c in coindix_model.VAULTS_FILTERS}
+            choices["vaults"]["-k"] = {c: {} for c in coindix_model.VAULT_KINDS}
+            choices["vaults"]["-c"] = {c: {} for c in coindix_model.CHAINS}
+            choices["vaults"]["-p"] = {c: {} for c in coindix_model.PROTOCOLS}
+            choices["govp"]["-s"] = {c: {} for c in terramoney_fcd_model.GOV_COLUMNS}
+            choices["govp"]["--status"] = {
+                c: {} for c in terramoney_fcd_model.GOV_STATUSES
+            }
+            choices["validators"]["-s"] = {
+                c: {} for c in terramoney_fcd_model.VALIDATORS_COLUMNS
+            }
+
+            self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def print_help(self):
+        """Print help"""
+        help_text = """[cmds]
+[info]Overview:[/info]
+    newsletter    Recent DeFi related newsletters [src][Substack][/src]
+    dpi           DeFi protocols listed on DefiPulse [src][Defipulse][/src]
+    funding       Funding rates - current or last 30 days average [src][Defirate][/src]
+    borrow        DeFi borrow rates - current or last 30 days average [src][Defirate][/src]
+    lending       DeFi ending rates - current or last 30 days average [src][Defirate][/src]
+    vaults        Top DeFi Vaults on different blockchains [src][[Coindix][/src]
+[src][The Graph][/src] [info]Uniswap[/info]
+    tokens        Tokens trade-able on Uniswap
+    stats         Base statistics about Uniswap
+    pairs         Recently added pairs on Uniswap
+    pools         Pools by volume on Uniswap
+    swaps         Recent swaps done on Uniswap
+[src][Defi Llama][/src]
+    ldapps        Lists dApps
+    gdapps        Displays top DeFi dApps grouped by chain
+    stvl          Displays historical values of the total sum of TVLs from all dApps
+    dtvl          Displays historical total value locked (TVL) by dApp
+[src][Terra Engineer][/src]
+    aterra        Displays 30-day history of specified asset in terra address [src][Terra Engineer][/src]
+    ayr           Displays 30-day history of anchor yield reserve [src][Terra Engineer][/src]
+[src][Terra FCD][/src]
+    sinfo         Displays staking info for provided terra account address
+    validators    Displays information about terra blockchain validators
+    govp          Displays terra blockchain governance proposals list
+    gacc          Displays terra blockchain account growth history
+    sratio        Displays terra blockchain staking ratio history
+    sreturn       Displays terra blockchain staking returns history
+
+[src][Smartstake][/src]
+    lcsc         Displays Luna circulating supply changes[/cmds]
+"""
+        console.print(text=help_text, menu="Cryptocurrency - Decentralized Finance")
+
+    def call_aterra(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="aterra",
+            description="""
+                Displays the 30-day history of an asset in a certain terra address.
+                [Source: https://terra.engineer/]
+            """,
+        )
+        parser.add_argument(
+            "--asset",
+            dest="asset",
+            type=str,
+            help="Terra asset {ust,luna,sdt} Default: ust",
+            default=terraengineer_model.ASSETS[0],
+            choices=terraengineer_model.ASSETS,
+        )
+        parser.add_argument(
+            "--address",
+            dest="address",
+            type=check_terra_address_format,
+            help="Terra address. Valid terra addresses start with 'terra'",
+            required="-h" not in other_args,
         )
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "--asset")
 
-        Parameters
-        -------
-        an_input : str
-            string with input arguments
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
 
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
+        if ns_parser:
+            terraengineer_view.display_terra_asset_history(
+                export=ns_parser.export,
+                address=ns_parser.address,
+                asset=ns_parser.asset,
+            )
 
-        # Empty command
-        if not an_input:
-            print("")
-            return None
+    def call_ayr(self, other_args: List[str]):
+        """Process ayr command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="ayr",
+            description="""
+                Displays the 30-day history of the Anchor Yield Reserve.
+                An increasing yield reserve indicates that the return on collateral staked by borrowers in Anchor
+                is greater than the yield paid to depositors. A decreasing yield reserve means yield paid
+                to depositors is outpacing the staking returns of borrower's collateral.
+                TLDR: Shows the address that contains UST that is paid on anchor interest earn.
+                [Source: https://terra.engineer/]
+            """,
+        )
 
-        (known_args, other_args) = self.defi_parser.parse_known_args(an_input.split())
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
 
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
+        if ns_parser:
+            terraengineer_view.display_anchor_yield_reserve(export=ns_parser.export)
 
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
+    def call_sinfo(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="sinfo",
+            description="""
+                Displays staking info of a certain terra address.
+                [Source: https://fcd.terra.dev/swagger]
+            """,
+        )
+        parser.add_argument(
+            "-a",
+            "--address",
+            dest="address",
+            type=check_terra_address_format,
+            help="Terra address. Valid terra addresses start with 'terra'",
+            required="-h" not in other_args,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of delegations",
+            default=10,
+        )
 
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-a")
 
-    def call_help(self, *_):
-        """Process Help command"""
-        self.print_help()
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
 
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
+        if ns_parser:
+            terramoney_fcd_view.display_account_staking_info(
+                export=ns_parser.export, address=ns_parser.address, top=ns_parser.limit
+            )
 
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
+    def call_validators(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="validators",
+            description="""
+                Displays information about terra validators.
+                [Source: https://fcd.terra.dev/swagger]
+            """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of validators to show",
+            default=10,
+        )
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column. Default: votingPower",
+            default="votingPower",
+            choices=[
+                "validatorName",
+                "tokensAmount",
+                "votingPower",
+                "commissionRate",
+                "status",
+                "uptime",
+            ],
+        )
+        parser.add_argument(
+            "--descend",
+            action="store_true",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
 
-    @try_except
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            terramoney_fcd_view.display_validators(
+                export=ns_parser.export,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                top=ns_parser.limit,
+            )
+
+    def call_govp(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="govp",
+            description="""
+                Displays terra blockchain governance proposals list.
+                [Source: https://fcd.terra.dev/swagger]
+            """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of proposals to show",
+            default=10,
+        )
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column. Default: id",
+            default="id",
+            choices=terramoney_fcd_model.GOV_COLUMNS,
+        )
+        parser.add_argument(
+            "--status",
+            dest="status",
+            type=str,
+            help="Status of proposal. Default: all",
+            default="all",
+            choices=terramoney_fcd_model.GOV_STATUSES,
+        )
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            terramoney_fcd_view.display_gov_proposals(
+                status=ns_parser.status,
+                export=ns_parser.export,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                top=ns_parser.limit,
+            )
+
+    def call_gacc(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="gacc",
+            description="""
+                Displays terra blockchain account growth history.
+                [Source: https://fcd.terra.dev/swagger]
+            """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of days to show",
+            default=90,
+        )
+        parser.add_argument(
+            "--cumulative",
+            action="store_false",
+            help="Show cumulative or discrete values. For active accounts only discrete value are available",
+            dest="cumulative",
+            default=True,
+        )
+        parser.add_argument(
+            "-k",
+            "--kind",
+            dest="kind",
+            type=str,
+            help="Total account count or active account count. Default: total",
+            default="total",
+            choices=["active", "total"],
+        )
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+
+        if ns_parser:
+            terramoney_fcd_view.display_account_growth(
+                kind=ns_parser.kind,
+                export=ns_parser.export,
+                cumulative=ns_parser.cumulative,
+                top=ns_parser.limit,
+            )
+
+    def call_sratio(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="sratio",
+            description="""
+                Displays terra blockchain staking ratio history.
+                [Source: https://fcd.terra.dev/swagger]
+            """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of days to show",
+            default=90,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+
+        if ns_parser:
+            terramoney_fcd_view.display_staking_ratio_history(
+                export=ns_parser.export, top=ns_parser.limit
+            )
+
+    def call_sreturn(self, other_args: List[str]):
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="sreturn",
+            description="""
+                 Displays terra blockchain staking returns history.
+                 [Source: https://fcd.terra.dev/swagger]
+             """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of days to show",
+            default=90,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
+        )
+
+        if ns_parser:
+            terramoney_fcd_view.display_staking_returns_history(
+                export=ns_parser.export, top=ns_parser.limit
+            )
+
     def call_dpi(self, other_args: List[str]):
         """Process dpi command"""
         parser = argparse.ArgumentParser(
@@ -125,11 +470,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=15,
         )
 
@@ -155,35 +500,88 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            defipulse_view.display_defipulse(
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
 
-        defipulse_view.display_defipulse(
-            top=ns_parser.top,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            export=ns_parser.export,
-        )
-
-    @try_except
-    def call_llama(self, other_args: List[str]):
-        """Process llama command"""
+    def call_gdapps(self, other_args: List[str]):
+        """Process gdapps command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="llama",
+            prog="gdapps",
             description="""
-                Display information about listed DeFi Protocols on DeFi Llama.
+                Display top dApps (in terms of TVL) grouped by chain.
+                [Source: https://docs.llama.fi/api]
+            """,
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            dest="limit",
+            type=check_positive,
+            help="Number of top dApps to display",
+            default=40,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            llama_view.display_grouped_defi_protocols(num=ns_parser.limit)
+
+    def call_dtvl(self, other_args: List[str]):
+        """Process dtvl command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="dtvl",
+            description="""
+                Displays historical TVL of different dApps.
+                [Source: https://docs.llama.fi/api]
+            """,
+        )
+        parser.add_argument(
+            "-d",
+            "--dapps",
+            dest="dapps",
+            type=str,
+            required="-h" not in other_args,
+            help="dApps to search historical TVL. Should be split by , e.g.: anchor,sushiswap,pancakeswap",
+        )
+        if other_args and not other_args[0][0] == "-":
+            other_args.insert(0, "-d")
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            llama_view.display_historical_tvl(dapps=ns_parser.dapps)
+
+    def call_ldapps(self, other_args: List[str]):
+        """Process ldapps command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="ldapps",
+            description="""
+                Display information about listed dApps on DeFi Llama.
                 [Source: https://docs.llama.fi/api]
             """,
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -194,16 +592,7 @@ class DefiController:
             type=str,
             help="Sort by given column. Default: tvl",
             default="tvl",
-            choices=[
-                "tvl",
-                "symbol",
-                "category",
-                "chains",
-                "change_1h",
-                "change_1d",
-                "change_7d",
-                "tvl",
-            ],
+            choices=llama_model.LLAMA_FILTERS,
         )
 
         parser.add_argument(
@@ -226,36 +615,33 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            llama_view.display_defi_protocols(
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                description=ns_parser.description,
+                export=ns_parser.export,
+            )
 
-        llama_view.display_defi_protocols(
-            top=ns_parser.top,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            description=ns_parser.description,
-            export=ns_parser.export,
-        )
-
-    @try_except
-    def call_tvl(self, other_args: List[str]):
-        """Process tvl command"""
+    def call_stvl(self, other_args: List[str]):
+        """Process stvl command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="tvl",
+            prog="stvl",
             description="""
-                Displays historical values of the total sum of TVLs from all listed protocols.
+                Displays historical values of the total sum of TVLs from all listed dApps.
                 [Source: https://docs.llama.fi/api]
             """,
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -263,12 +649,9 @@ class DefiController:
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            llama_view.display_defi_tvl(top=ns_parser.limit, export=ns_parser.export)
 
-        llama_view.display_defi_tvl(top=ns_parser.top, export=ns_parser.export)
-
-    @try_except
     def call_funding(self, other_args: List[str]):
         """Process funding command"""
         parser = argparse.ArgumentParser(
@@ -282,11 +665,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -302,14 +685,11 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            defirate_view.display_funding_rates(
+                top=ns_parser.limit, current=ns_parser.current, export=ns_parser.export
+            )
 
-        defirate_view.display_funding_rates(
-            top=ns_parser.top, current=ns_parser.current, export=ns_parser.export
-        )
-
-    @try_except
     def call_borrow(self, other_args: List[str]):
         """Process borrow command"""
         parser = argparse.ArgumentParser(
@@ -323,11 +703,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -343,14 +723,11 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            defirate_view.display_borrow_rates(
+                top=ns_parser.limit, current=ns_parser.current, export=ns_parser.export
+            )
 
-        defirate_view.display_borrow_rates(
-            top=ns_parser.top, current=ns_parser.current, export=ns_parser.export
-        )
-
-    @try_except
     def call_lending(self, other_args: List[str]):
         """Process lending command"""
         parser = argparse.ArgumentParser(
@@ -364,11 +741,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=15,
         )
 
@@ -384,14 +761,11 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            defirate_view.display_lending_rates(
+                top=ns_parser.limit, current=ns_parser.current, export=ns_parser.export
+            )
 
-        defirate_view.display_lending_rates(
-            top=ns_parser.top, current=ns_parser.current, export=ns_parser.export
-        )
-
-    @try_except
     def call_newsletter(self, other_args: List[str]):
         """Process newsletter command"""
         parser = argparse.ArgumentParser(
@@ -405,11 +779,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="top N number records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -417,12 +791,11 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            substack_view.display_newsletters(
+                top=ns_parser.limit, export=ns_parser.export
+            )
 
-        substack_view.display_newsletters(top=ns_parser.top, export=ns_parser.export)
-
-    @try_except
     def call_tokens(self, other_args: List[str]):
         """Process tokens command"""
         parser = argparse.ArgumentParser(
@@ -458,14 +831,7 @@ class DefiController:
             type=str,
             help="Sort by given column. Default: index",
             default="index",
-            choices=[
-                "index",
-                "symbol",
-                "name",
-                "tradeVolumeUSD",
-                "totalLiquidity",
-                "txCount",
-            ],
+            choices=graph_model.TOKENS_FILTERS,
         )
 
         parser.add_argument(
@@ -480,18 +846,15 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            graph_view.display_uni_tokens(
+                skip=ns_parser.skip,
+                limit=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
 
-        graph_view.display_uni_tokens(
-            skip=ns_parser.skip,
-            limit=ns_parser.limit,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_stats(self, other_args: List[str]):
         """Process stats command"""
         parser = argparse.ArgumentParser(
@@ -508,12 +871,9 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            graph_view.display_uni_stats(export=ns_parser.export)
 
-        graph_view.display_uni_stats(export=ns_parser.export)
-
-    @try_except
     def call_pairs(self, other_args: List[str]):
         """Process pairs command"""
         parser = argparse.ArgumentParser(
@@ -527,11 +887,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="Number of records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -568,15 +928,7 @@ class DefiController:
             type=str,
             help="Sort by given column. Default: created",
             default="created",
-            choices=[
-                "created",
-                "pair",
-                "token0",
-                "token1",
-                "volumeUSD",
-                "txCount",
-                "totalSupply",
-            ],
+            choices=graph_model.PAIRS_FILTERS,
         )
 
         parser.add_argument(
@@ -591,20 +943,17 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            graph_view.display_recently_added(
+                top=ns_parser.limit,
+                days=ns_parser.days,
+                min_volume=ns_parser.vol,
+                min_tx=ns_parser.tx,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
 
-        graph_view.display_recently_added(
-            top=ns_parser.top,
-            days=ns_parser.days,
-            min_volume=ns_parser.vol,
-            min_tx=ns_parser.tx,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_pools(self, other_args: List[str]):
         """Process pools command"""
         parser = argparse.ArgumentParser(
@@ -618,11 +967,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="Number of records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -633,15 +982,7 @@ class DefiController:
             type=str,
             help="Sort by given column. Default: volumeUSD",
             default="volumeUSD",
-            choices=[
-                "volumeUSD",
-                "token0.name",
-                "token0.symbol",
-                "token1.name",
-                "token1.symbol",
-                "volumeUSD",
-                "txCount",
-            ],
+            choices=graph_model.POOLS_FILTERS,
         )
 
         parser.add_argument(
@@ -656,17 +997,14 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            graph_view.display_uni_pools(
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
 
-        graph_view.display_uni_pools(
-            top=ns_parser.top,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            export=ns_parser.export,
-        )
-
-    @try_except
     def call_swaps(self, other_args: List[str]):
         """Process swaps command"""
         parser = argparse.ArgumentParser(
@@ -680,11 +1018,11 @@ class DefiController:
         )
 
         parser.add_argument(
-            "-t",
-            "--top",
-            dest="top",
+            "-l",
+            "--limit",
+            dest="limit",
             type=check_positive,
-            help="Number of records",
+            help="Number of records to display",
             default=10,
         )
 
@@ -695,7 +1033,7 @@ class DefiController:
             type=str,
             help="Sort by given column. Default: timestamp",
             default="timestamp",
-            choices=["timestamp", "token0", "token1", "amountUSD"],
+            choices=graph_model.SWAPS_FILTERS,
         )
 
         parser.add_argument(
@@ -710,69 +1048,148 @@ class DefiController:
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
-        if not ns_parser:
-            return
+        if ns_parser:
+            graph_view.display_last_uni_swaps(
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                export=ns_parser.export,
+            )
 
-        graph_view.display_last_uni_swaps(
-            top=ns_parser.top,
-            sortby=ns_parser.sortby,
-            descend=ns_parser.descend,
-            export=ns_parser.export,
+    def call_vaults(self, other_args: List[str]):
+        """Process swaps command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="vaults",
+            description="""
+                Display Top DeFi Vaults.
+                [Source: https://coindix.com/]
+            """,
         )
 
-    def print_help(self):
-        """Print help"""
-        help_text = """
-Decentralized Finance:
-    cls         clear screen
-    ?/help      show this menu again
-    q           quit this menu, and shows back to main menu
-    quit        quit to abandon the program
+        parser.add_argument(
+            "-c",
+            "--chain",
+            dest="chain",
+            type=str,
+            help="Blockchain name e.g. ethereum, terra",
+            default=None,
+            choices=coindix_model.CHAINS,
+            required=False,
+        )
 
-Overview:
-    llama         DeFi protocols listed on DeFi Llama
-    tvl           Total value locked of DeFi protocols
-    newsletter    Recent DeFi related newsletters
-    dpi           DeFi protocols listed on DefiPulse
-    funding       Funding reates - current or last 30 days average
-    borrow        DeFi borrow rates - current or last 30 days average
-    lending       DeFi ending rates - current or last 30 days average
+        parser.add_argument(
+            "-p",
+            "--protocol",
+            dest="protocol",
+            type=str,
+            help="DeFi protocol name e.g. aave, uniswap",
+            default=None,
+            choices=coindix_model.PROTOCOLS,
+            required=False,
+        )
 
-Uniswap:
-    tokens        Tokens trade-able on Uniswap
-    stats         Base statistics about Uniswap
-    pairs         Recently added pairs on Uniswap
-    pools         Pools by volume on Uniswap
-    swaps         Recent swaps done on Uniswap"""
-        print(help_text, "\n")
+        parser.add_argument(
+            "-k",
+            "--kind",
+            dest="kind",
+            type=str,
+            help="Kind/type of vault e.g. lp, single, noimploss, stable",
+            default=None,
+            choices=coindix_model.VAULT_KINDS,
+            required=False,
+        )
 
+        parser.add_argument(
+            "-t",
+            "--top",
+            dest="limit",
+            type=check_positive,
+            help="Number of records to display",
+            default=10,
+        )
 
-def menu():
-    """Defi Menu"""
-    defi_controller = DefiController()
-    defi_controller.call_help(None)
+        parser.add_argument(
+            "-s",
+            "--sort",
+            dest="sortby",
+            type=str,
+            help="Sort by given column. Default: timestamp",
+            default="apy",
+            choices=coindix_model.VAULTS_FILTERS,
+        )
 
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in defi_controller.CHOICES}
+        parser.add_argument(
+            "--descend",
+            action="store_false",
+            help="Flag to sort in descending order (lowest first)",
+            dest="descend",
+            default=False,
+        )
+
+        parser.add_argument(
+            "-l",
+            "--links",
+            action="store_false",
+            help="Flag to show vault link",
+            dest="link",
+            default=True,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+        )
+
+        if ns_parser:
+            coindix_view.display_defi_vaults(
+                chain=ns_parser.chain,
+                kind=ns_parser.kind,
+                protocol=ns_parser.protocol,
+                top=ns_parser.limit,
+                sortby=ns_parser.sortby,
+                descend=ns_parser.descend,
+                link=ns_parser.link,
+                export=ns_parser.export,
             )
-            an_input = session.prompt(
-                f"{get_flair()} (crypto)>(defi)> ",
-                completer=completer,
+
+    def call_lcsc(self, other_args: List[str]):
+        """Process lcsc command"""
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            prog="lcsc",
+            description="""
+                Display Luna circulating supply changes stats.
+                [Source: Smartstake.io]
+
+                Follow these steps to get the key token:
+                1. Head to https://terra.smartstake.io/
+                2. Right click on your browser and choose Inspect
+                3. Select Network tab (by clicking on the expand button next to Source tab)
+                4. Go to Fetch/XHR tab, and refresh the page
+                5. Get the option looks similar to the following: `listData?type=history&dayCount=30`
+                6. Extract the key and token out of the URL
+
+            """,
+        )
+
+        parser.add_argument(
+            "-d",
+            "--days",
+            dest="days",
+            type=check_positive,
+            help="Number of days to display. Default: 30 days",
+            default=30,
+        )
+
+        ns_parser = parse_known_args_and_warn(
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES, limit=5
+        )
+
+        if ns_parser:
+            smartstake_view.display_luna_circ_supply_change(
+                days=ns_parser.days,
+                limit=ns_parser.limit,
+                export=ns_parser.export,
             )
-        else:
-            an_input = input(f"{get_flair()} (crypto)>(defi)> ")
-
-        try:
-            process_input = defi_controller.switch(an_input)
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            continue
-
-        if process_input is False:
-            return False
-
-        if process_input is True:
-            return True

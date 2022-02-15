@@ -2,110 +2,66 @@
 __docformat__ = "numpy"
 
 import argparse
-import difflib
-from typing import List
+from typing import List, Dict
 
-from colorama import Style
 from prompt_toolkit.completion import NestedCompleter
 
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.economy.fred import fred_view, fred_model
 from gamestonk_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     check_positive,
-    get_flair,
     parse_known_args_and_warn,
     valid_date,
-    try_except,
-    system_clear,
 )
 from gamestonk_terminal.menu import session
 
+# pylint: disable=import-outside-toplevel
 
-class FredController:
-    CHOICES = ["cls", "?", "help", "q", "quit"]
+
+class FredController(BaseController):
+    """FRED Controller Class"""
 
     CHOICES_COMMANDS = ["search", "add", "rmv", "plot"]
+    CHOICES_MENUS = ["pred"]
+    PATH = "/economy/fred/"
 
-    CHOICES += CHOICES_COMMANDS
-
-    def __init__(self):
+    def __init__(self, queue: List[str] = None):
         """Constructor"""
-        self.fred_parser = argparse.ArgumentParser(add_help=False, prog="fred")
-        self.fred_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
-        )
-        self.current_series = dict()
-        self.current_long_id = 0
+        super().__init__(queue)
+
+        self.current_series: Dict = dict()
+        self.long_id = 0
+
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: {} for c in self.controller_choices}
+            self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
         """Print help"""
         id_string = ""
         for s_id, sub_dict in self.current_series.items():
-            id_string += f"    {s_id.upper()}{(self.current_long_id-len(s_id)) * ' '} : {sub_dict['title']}\n"
-        help_text = f"""
-What do you want to do?
-    cls           clear screen
-    ?/help        show this menu again
-    q             quit this menu, and shows back to main menu
-    quit          quit to abandon program
-
+            id_string += (
+                f"    {s_id.upper()}{(self.long_id-len(s_id)) * ' '} :"
+                f" [italic]{sub_dict['title']}[/italic]\n"
+            )
+        if not id_string:
+            id_string += "    [bold][red]None[/red][/bold]\n"
+        help_text = f"""[cmds]
     search        search FRED series notes
     add           add series ID to list
-    rmv           remove series ID from list
+    rmv           remove series ID from list[/cmds]
 
-Current Series IDs:
-{id_string}{Style.DIM if not self.current_series else ""}
-    plot          plot selected series {Style.RESET_ALL}
+[param]Current Series IDs:[/param]
+{id_string}{'[dim]'if not self.current_series else ""}[cmds]
+    plot          plot selected series [/cmds]{'[/dim]'if not self.current_series else ""}
+{'[dim]'if len(self.current_series.keys())!=1 else ""}[menu]
+>   pred          prediction techniques (single SeriesID)[/menu]{'[/dim]'if len(self.current_series.keys())!=1 else ""}
         """
-        print(help_text)
+        console.print(text=help_text, menu="Economy - Federal Reserve Economic Data")
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
-
-        Returns
-        -------
-        MENU_GO_BACK, MENU_QUIT, MENU_RESET
-            MENU_GO_BACK - Show main context menu again
-            MENU_QUIT - Quit terminal
-            MENU_RESET - Reset terminal and go back to same previous menu
-        """
-
-        # Empty command
-        if not an_input:
-            print("")
-            return None
-
-        (known_args, other_args) = self.fred_parser.parse_known_args(an_input.split())
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_q(self, _):
-        """Process Q command - quit the menu"""
-        return False
-
-    def call_quit(self, _):
-        """Process Quit command - exit the program"""
-        return True
-
-    @try_except
     def call_search(self, other_args: List[str]):
         """Process search command"""
         parser = argparse.ArgumentParser(
@@ -132,19 +88,17 @@ Current Series IDs:
             default=5,
             help="Maximum number of series notes to display.",
         )
-        if other_args and "-" not in other_args[0]:
+        if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-s")
 
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
 
-        fred_view.notes(
-            series_term=ns_parser.series_term,
-            num=ns_parser.num,
-        )
+            fred_view.notes(
+                series_term=ns_parser.series_term,
+                num=ns_parser.num,
+            )
 
-    @try_except
     def call_add(self, other_args: List[str]):
         """Process add command"""
         parser = argparse.ArgumentParser(
@@ -160,27 +114,26 @@ Current Series IDs:
             type=str,
             help="FRED Series from https://fred.stlouisfed.org. For multiple series use: series1,series2,series3",
         )
-        if other_args and "-" not in other_args[0]:
+        if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-i")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            # Loop through entries.  If it exists, save title in dictionary
+            for s_id in ns_parser.series_id.split(","):
+                exists, information = fred_model.check_series_id(s_id)
+                if exists:
+                    self.current_series[s_id] = {
+                        "title": information["seriess"][0]["title"],
+                        "units": information["seriess"][0]["units_short"],
+                    }
+                    self.long_id = max(self.long_id, len(s_id))
+                else:
+                    console.print(f"[red]{s_id} not found[/red].")
 
-        # Loop through entries.  If it exists, save title in dictionary
-        for s_id in ns_parser.series_id.split(","):
-            exists, information = fred_model.check_series_id(s_id)
-            if exists:
-                self.current_series[s_id] = {
-                    "title": information["seriess"][0]["title"],
-                    "units": information["seriess"][0]["units_short"],
-                }
-                self.current_long_id = max(self.current_long_id, len(s_id))
+            console.print(
+                f"Current Series:[blue] {', '.join(self.current_series.keys()) .upper() or None}[/blue]\n"
+            )
 
-        print(
-            f"Current Series: {', '.join(self.current_series.keys()) .upper() or None}\n"
-        )
-
-    @try_except
     def call_rmv(self, other_args: List[str]):
         """Process rmv command"""
         parser = argparse.ArgumentParser(
@@ -199,7 +152,7 @@ Current Series IDs:
         parser.add_argument(
             "-i",
             "--id",
-            type=str,
+            type=lambda x: x.lower(),
             choices=self.current_series.keys(),
             required="-h" not in other_args
             and "-a" not in other_args
@@ -218,19 +171,17 @@ Current Series IDs:
             ):
                 other_args.insert(0, "-i")
         ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
+        if ns_parser:
+            if ns_parser.all:
+                self.current_series = {}
+                self.long_id = 0
+                console.print("")
+            else:
+                self.current_series.pop(ns_parser.series_id)
+                console.print(
+                    f"Current Series Ids: [blue]{', '.join(self.current_series.keys()) or None}[/blue]\n"
+                )
 
-        if ns_parser.all:
-            self.current_series = {}
-            self.current_long_id = 0
-            print("")
-            return
-
-        self.current_series.pop(ns_parser.series_id)
-        print(f"Current Series Ids: {', '.join(self.current_series.keys()) or None}\n")
-
-    @try_except
     def call_plot(self, other_args):
         """Process plot command"""
         parser = argparse.ArgumentParser(
@@ -252,50 +203,39 @@ Current Series IDs:
             action="store_true",
             default=False,
         )
+        parser.add_argument(
+            "-l",
+            "--lim",
+            dest="limit",
+            help="Number of rows to show for limit",
+            type=check_positive,
+            default=10,
+        )
 
         ns_parser = parse_known_args_and_warn(
             parser, other_args, export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
-        if not ns_parser:
-            return
+        if ns_parser:
+            fred_view.display_fred_series(
+                self.current_series,
+                ns_parser.start_date,
+                ns_parser.raw,
+                ns_parser.export,
+                ns_parser.limit,
+            )
 
-        fred_view.display_fred_series(
-            self.current_series, ns_parser.start_date, ns_parser.raw, ns_parser.export
+    def call_pred(self, _):
+        """Process pred command"""
+        if not self.current_series:
+            console.print("Please select 1 Series to use.\n")
+            return
+        if len(self.current_series.keys()) != 1:
+            console.print("Only 1 Series can be input into prediction.\n")
+            return
+        from gamestonk_terminal.economy.fred.prediction.pred_controller import (
+            PredictionTechniquesController,
         )
 
-
-def menu():
-    """Fred Menu"""
-
-    fred_controller = FredController()
-    fred_controller.print_help()
-
-    # Loop forever and ever
-    while True:
-        # Get input command from user
-        if session and gtff.USE_PROMPT_TOOLKIT:
-            completer = NestedCompleter.from_nested_dict(
-                {c: None for c in fred_controller.CHOICES}
-            )
-
-            an_input = session.prompt(
-                f"{get_flair()} (economy)(fred)> ",
-                completer=completer,
-            )
-        else:
-            an_input = input(f"{get_flair()} (economy)(fred)> ")
-        try:
-            process_input = fred_controller.switch(an_input)
-
-            if process_input is not None:
-                return process_input
-
-        except SystemExit:
-            print("The command selected doesn't exist\n")
-            similar_cmd = difflib.get_close_matches(
-                an_input, fred_controller.CHOICES, n=1, cutoff=0.7
-            )
-
-            if similar_cmd:
-                print(f"Did you mean '{similar_cmd[0]}'?\n")
-            continue
+        self.queue = self.load_class(
+            PredictionTechniquesController, self.current_series, self.queue
+        )

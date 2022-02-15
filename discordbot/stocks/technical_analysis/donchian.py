@@ -1,15 +1,16 @@
 import os
 from datetime import datetime, timedelta
-import discord
+
+import disnake
 from matplotlib import pyplot as plt
+from PIL import Image
 
 import discordbot.config_discordbot as cfg
-from discordbot.run_discordbot import gst_imgur
 import discordbot.helpers
-
-from gamestonk_terminal.helper_funcs import plot_autoscale
+from discordbot.config_discordbot import gst_imgur, logger
 from gamestonk_terminal.common.technical_analysis import volatility_model
 from gamestonk_terminal.config_plot import PLOT_DPI
+from gamestonk_terminal.helper_funcs import plot_autoscale
 
 
 async def donchian_command(
@@ -21,8 +22,13 @@ async def donchian_command(
 
         # Debug
         if cfg.DEBUG:
-            print(
-                f"!stocks.ta.donchian {ticker} {upper_length} {lower_length} {start} {end}"
+            logger.debug(
+                "!stocks.ta.donchian %s %s %s %s %s",
+                ticker,
+                upper_length,
+                lower_length,
+                start,
+                end,
             )
 
         # Check for argument
@@ -54,9 +60,12 @@ async def donchian_command(
         # Retrieve Data
         df_stock = df_stock.loc[(df_stock.index >= start) & (df_stock.index < end)]
 
-        df_ta = volatility_model.donchian(df_stock, upper_length, lower_length)
+        df_ta = volatility_model.donchian(
+            df_stock["High"], df_stock["Low"], upper_length, lower_length
+        )
 
         # Output Data
+        plt.style.use("seaborn")
         fig, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
         ax.plot(df_stock.index, df_stock["Adj Close"].values, color="k", lw=3)
         ax.plot(df_ta.index, df_ta.iloc[:, 0].values, "b", lw=1.5, label="upper")
@@ -83,12 +92,33 @@ async def donchian_command(
         plt.legend()
 
         plt.savefig("ta_donchian.png")
+        imagefile = "ta_donchian.png"
+
+        img = Image.open(imagefile)
+        print(img.size)
+        im_bg = Image.open(cfg.IMG_BG)
+        h = img.height + 240
+        w = img.width + 520
+
+        img = img.resize((w, h), Image.ANTIALIAS)
+        x1 = int(0.5 * im_bg.size[0]) - int(0.5 * img.size[0])
+        y1 = int(0.5 * im_bg.size[1]) - int(0.5 * img.size[1])
+        x2 = int(0.5 * im_bg.size[0]) + int(0.5 * img.size[0])
+        y2 = int(0.5 * im_bg.size[1]) + int(0.5 * img.size[1])
+        img = img.convert("RGB")
+        im_bg.paste(img, box=(x1 - 5, y1, x2 - 5, y2))
+        im_bg.save(imagefile, "PNG", quality=100)
+
+        image = Image.open(imagefile)
+        image = discordbot.helpers.autocrop_image(image, 0)
+        image.save(imagefile, "PNG", quality=100)
+
         uploaded_image = gst_imgur.upload_image("ta_donchian.png", title="something")
         image_link = uploaded_image.link
         if cfg.DEBUG:
-            print(f"Image URL: {image_link}")
+            logger.debug("Image URL: %s", image_link)
         title = "Stocks: Donchian-Channels " + ticker
-        embed = discord.Embed(title=title, colour=cfg.COLOR)
+        embed = disnake.Embed(title=title, colour=cfg.COLOR)
         embed.set_author(
             name=cfg.AUTHOR_NAME,
             icon_url=cfg.AUTHOR_ICON_URL,
@@ -99,7 +129,7 @@ async def donchian_command(
         await ctx.send(embed=embed)
 
     except Exception as e:
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="ERROR Stocks: Donchian-Channels",
             colour=cfg.COLOR,
             description=e,
@@ -109,4 +139,4 @@ async def donchian_command(
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

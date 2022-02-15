@@ -1,15 +1,21 @@
 """Stockanalysis.com/etf Model"""
 __docformat__ = "numpy"
 
-from typing import List, Tuple
 import json
+import logging
+from typing import List, Tuple
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup as bs
+
+from gamestonk_terminal.decorators import log_start_end
 from gamestonk_terminal.helper_funcs import get_user_agent
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def get_all_names_symbols() -> Tuple[List[str], List[str]]:
     """Gets all etf names and symbols
 
@@ -25,12 +31,14 @@ def get_all_names_symbols() -> Tuple[List[str], List[str]]:
     )
     soup2 = bs(r.text, "html.parser")
     script = soup2.find("script", {"id": "__NEXT_DATA__"})
-    etfs = pd.DataFrame(json.loads(script.text)["props"]["pageProps"]["stocks"])
+
+    etfs = pd.DataFrame(json.loads(script.string)["props"]["pageProps"]["stocks"])
     etf_symbols = etfs.s.to_list()
     etf_names = etfs.n.to_list()
     return etf_symbols, etf_names
 
 
+@log_start_end(log=logger)
 def get_etf_overview(etf_symbol: str) -> pd.DataFrame:
     """Get overview data for selected etf
 
@@ -64,6 +72,7 @@ def get_etf_overview(etf_symbol: str) -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_etf_holdings(symbol: str) -> pd.DataFrame:
     """Get ETF holdings
 
@@ -80,24 +89,27 @@ def get_etf_holdings(symbol: str) -> pd.DataFrame:
 
     link = f"https://stockanalysis.com/etf/{symbol}/holdings/"
     r = requests.get(link, headers={"User-Agent": get_user_agent()})
-    soup = bs(r.text, "html.parser")
-    soup = soup.find("table")
-    tds = soup.findAll("td")
-    tickers = []
-    for i in tds[1::5]:
-        tickers.append(i.text)
-    percents = []
-    for i in tds[3::5]:
-        percents.append(i.text)
-    shares = []
-    for i in tds[4::5]:
-        shares.append(i.text)
-    df = pd.DataFrame(index=tickers)
-    df["% Of Etf"] = percents
-    df["Shares"] = shares
-    return df
+    if r.status_code == 200:
+        soup = bs(r.text, "html.parser")
+        soup = soup.find("table")
+        tds = soup.findAll("td")
+        tickers = []
+        for i in tds[1::5]:
+            tickers.append(i.text)
+        percents = []
+        for i in tds[3::5]:
+            percents.append(i.text)
+        shares = []
+        for i in tds[4::5]:
+            shares.append(i.text)
+        df = pd.DataFrame(index=tickers)
+        df["% Of Etf"] = percents
+        df["Shares"] = shares
+        return df
+    return pd.DataFrame()
 
 
+@log_start_end(log=logger)
 def compare_etfs(symbols: List[str]) -> pd.DataFrame:
     """Compare selected ETFs
 
@@ -119,23 +131,31 @@ def compare_etfs(symbols: List[str]) -> pd.DataFrame:
     return df_compare
 
 
-def search_etfs(to_search) -> List[str]:
-    """Search for an etf string in list of ETFs
+@log_start_end(log=logger)
+def get_etfs_by_name(name_to_search: str) -> pd.DataFrame:
+    """Get an ETF symbol and name based on ETF string to search. [Source: StockAnalysis]
 
     Parameters
     ----------
-    to_search: str
-        String to match
+    name_to_search: str
+        ETF name to match
 
     Returns
     -------
-    matching_etfs: List[str]
-        List of matching ETF names
+    df: pd.Dataframe
+        Dataframe with symbols and names
     """
     all_symbols, all_names = get_all_names_symbols()
-    matching_etfs = [
-        all_symbols[idx] + " - " + etf
-        for idx, etf in enumerate(all_names)
-        if to_search.lower() in etf.lower()
-    ]
-    return matching_etfs
+
+    filtered_symbols = list()
+    filtered_names = list()
+    for symbol, name in zip(all_symbols, all_names):
+        if name_to_search.lower() in name.lower():
+            filtered_symbols.append(symbol)
+            filtered_names.append(name)
+
+    df = pd.DataFrame(
+        list(zip(filtered_symbols, filtered_names)), columns=["Symbol", "Name"]
+    )
+
+    return df

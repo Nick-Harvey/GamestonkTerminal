@@ -1,29 +1,24 @@
 import os
-import discord
-from matplotlib import pyplot as plt
+
+import disnake
 import numpy as np
+from matplotlib import pyplot as plt
+from PIL import Image
 
 import discordbot.config_discordbot as cfg
-from discordbot.run_discordbot import gst_imgur
-
+from discordbot.config_discordbot import gst_imgur, logger
+from discordbot.helpers import autocrop_image
 from gamestonk_terminal.config_plot import PLOT_DPI
-from gamestonk_terminal.stocks.government import quiverquant_model
 from gamestonk_terminal.helper_funcs import plot_autoscale
+from gamestonk_terminal.stocks.government import quiverquant_model
 
 
-async def qtrcontracts_command(ctx, num="", analysis=""):
+async def qtrcontracts_command(ctx, num: int = 20, analysis=""):
     """Displays a look at government contracts [quiverquant.com]"""
     try:
         # Debug user input
         if cfg.DEBUG:
-            print(f"!stocks.gov.qtrcontracts {num} {analysis}")
-
-        if num == "":
-            num = 20
-        else:
-            if not num.lstrip("-").isnumeric():
-                raise Exception("Number has to be an integer")
-            num = int(num)
+            logger.debug("!stocks.gov.qtrcontracts %s %s", num, analysis)
 
         possible_args = ["total", "upmom", "downmom"]
         if analysis == "":
@@ -40,6 +35,7 @@ async def qtrcontracts_command(ctx, num="", analysis=""):
             raise Exception("No quarterly government contracts found")
 
         tickers = quiverquant_model.analyze_qtr_contracts(analysis, num)
+        plt.style.use("seaborn")
 
         # Output Data
         if analysis in {"upmom", "downmom"}:
@@ -90,14 +86,35 @@ async def qtrcontracts_command(ctx, num="", analysis=""):
             fig.tight_layout()
 
             plt.savefig("gov_qtrcontracts.png")
+            imagefile = "gov_qtrcontracts.png"
+
+            img = Image.open(imagefile)
+            print(img.size)
+            im_bg = Image.open(cfg.IMG_BG)
+            h = img.height + 240
+            w = img.width + 520
+
+            img = img.resize((w, h), Image.ANTIALIAS)
+            x1 = int(0.5 * im_bg.size[0]) - int(0.5 * img.size[0])
+            y1 = int(0.5 * im_bg.size[1]) - int(0.5 * img.size[1])
+            x2 = int(0.5 * im_bg.size[0]) + int(0.5 * img.size[0])
+            y2 = int(0.5 * im_bg.size[1]) + int(0.5 * img.size[1])
+            img = img.convert("RGB")
+            im_bg.paste(img, box=(x1 - 5, y1, x2 - 5, y2))
+            im_bg.save(imagefile, "PNG", quality=100)
+
+            image = Image.open(imagefile)
+            image = autocrop_image(image, 0)
+            image.save(imagefile, "PNG", quality=100)
+
             uploaded_image = gst_imgur.upload_image(
                 "gov_qtrcontracts.png", title="something"
             )
             image_link = uploaded_image.link
             if cfg.DEBUG:
-                print(f"Image URL: {image_link}")
+                logger.debug("Image URL: %s", image_link)
             title = "Stocks: [quiverquant.com] Government contracts"
-            embed = discord.Embed(
+            embed = disnake.Embed(
                 title=title, description=description, colour=cfg.COLOR
             )
             embed.set_author(
@@ -110,10 +127,14 @@ async def qtrcontracts_command(ctx, num="", analysis=""):
             await ctx.send(embed=embed)
 
         elif analysis == "total":
-            description = tickers.to_string()
-            embed = discord.Embed(
+
+            tickers.index = [ind + " " * (7 - len(ind)) for ind in tickers.index]
+            tickers[:] = [str(round(val[0] / 1e9, 2)) for val in tickers.values]
+            tickers.columns = ["Amount [M]"]
+
+            embed = disnake.Embed(
                 title="Stocks: [quiverquant.com] Government contracts",
-                description=description,
+                description=tickers.to_string(),
                 colour=cfg.COLOR,
             )
             embed.set_author(
@@ -124,7 +145,7 @@ async def qtrcontracts_command(ctx, num="", analysis=""):
             await ctx.send(embed=embed)
 
     except Exception as e:
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="ERROR Stocks: [quiverquant.com] Government contracts",
             colour=cfg.COLOR,
             description=e,
@@ -134,4 +155,4 @@ async def qtrcontracts_command(ctx, num="", analysis=""):
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

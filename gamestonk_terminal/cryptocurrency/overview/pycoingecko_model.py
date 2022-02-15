@@ -1,26 +1,104 @@
 """CoinGecko model"""
 __docformat__ = "numpy"
 
-import math
-import pandas as pd
+# pylint: disable=C0301, E1101
+
+import logging
+import re
+from typing import Any, List
+
 import numpy as np
+import pandas as pd
 from pycoingecko import CoinGeckoAPI
+
 from gamestonk_terminal.cryptocurrency.dataframe_helpers import (
-    wrap_text_in_df,
     create_df_index,
+    long_number_format_with_type_check,
     replace_underscores_in_column_names,
 )
-from gamestonk_terminal.cryptocurrency.pycoingecko_helpers import (
-    replace_qm,
-    clean_row,
-    scrape_gecko_data,
-    GECKO_BASE_URL,
-)
+from gamestonk_terminal.cryptocurrency.discovery.pycoingecko_model import get_coins
+from gamestonk_terminal.decorators import log_start_end
+
+logger = logging.getLogger(__name__)
+
+HOLD_COINS = ["ethereum", "bitcoin"]
+
+NEWS_FILTERS = ["Index", "Title", "Author", "Posted"]
+
+CATEGORIES_FILTERS = [
+    "Rank",
+    "Name",
+    "Change_1h",
+    "Change_24h",
+    "Change_7d",
+    "Market_Cap",
+    "Volume_24h",
+    "Coins",
+]
+
+STABLES_FILTERS = [
+    "Rank",
+    "Name",
+    "Symbol",
+    "Price",
+    "Change_24h",
+    "Exchanges",
+    "Market_Cap",
+    "Change_30d",
+]
+
+PRODUCTS_FILTERS = [
+    "Rank",
+    "Platform",
+    "Identifier",
+    "Supply_Rate",
+    "Borrow_Rate",
+]
+
+PLATFORMS_FILTERS = ["Rank", "Name", "Category", "Centralized"]
+
+EXCHANGES_FILTERS = [
+    "Rank",
+    "Trust_Score",
+    "Id",
+    "Name",
+    "Country",
+    "Year Established",
+    "Trade_Volume_24h_BTC",
+]
+
+EXRATES_FILTERS = ["Index", "Name", "Unit", "Value", "Type"]
+
+INDEXES_FILTERS = ["Rank", "Name", "Id", "Market", "Last", "MultiAsset"]
+
+DERIVATIVES_FILTERS = [
+    "Rank",
+    "Market",
+    "Symbol",
+    "Price",
+    "Pct_Change_24h",
+    "Contract_Type",
+    "Basis",
+    "Spread",
+    "Funding_Rate",
+    "Volume_24h",
+]
+
+COINS_COLUMNS = [
+    "symbol",
+    "name",
+    "current_price",
+    "market_cap",
+    "market_cap_rank",
+    "price_change_percentage_7d_in_currency",
+    "price_change_percentage_24h_in_currency",
+    "total_volume",
+]
 
 
-def get_holdings_overview(endpoint: str = "bitcoin") -> pd.DataFrame:
-    """Scrapes overview of public companies that holds ethereum or bitcoin
-    from "https://www.coingecko.com/en/public-companies-{bitcoin/ethereum}" [Source: CoinGecko]
+@log_start_end(log=logger)
+def get_holdings_overview(endpoint: str = "bitcoin") -> List[Any]:
+    """Returns public companies that holds ethereum or bitcoin [Source: CoinGecko]
 
     Parameters
     ----------
@@ -29,174 +107,80 @@ def get_holdings_overview(endpoint: str = "bitcoin") -> pd.DataFrame:
 
     Returns
     -------
-    pandas.DataFrame
-        Metric, Value
+    List:
+        - str:              Overall statistics
+        - pandas.DataFrame: Companies holding crypto
     """
+    cg = CoinGeckoAPI()
+    data = cg.get_companies_public_treasury_by_coin_id(coin_id=endpoint)
 
-    url = f"https://www.coingecko.com/en/public-companies-{endpoint}"
-    rows = scrape_gecko_data(url).find_all(
-        "span", class_="overview-box d-inline-block p-3 mr-2"
-    )
-    kpis = {}
-    for row in rows:
-        row_cleaned = clean_row(row)
-        if row_cleaned:
-            value, *kpi = row_cleaned
-            name = " ".join(kpi)
-            kpis[name] = value
+    stats_str = f"""{len(data["companies"])} companies hold a total of {long_number_format_with_type_check(data["total_holdings"])} {endpoint} ({data["market_cap_dominance"]}% of market cap dominance) with the current value of {long_number_format_with_type_check(int(data["total_value_usd"]))} USD dollars"""  # noqa
 
-    df = pd.Series(kpis).to_frame().reset_index()
-    df.columns = ["Metric", "Value"]
-    df["Metric"] = df["Metric"].apply(
-        lambda x: replace_underscores_in_column_names(x) if isinstance(x, str) else x
-    )
-    return df
+    df = pd.json_normalize(data, record_path=["companies"])
 
-
-def get_companies_assets(endpoint: str = "bitcoin") -> pd.DataFrame:
-    """Scrapes list of companies that holds ethereum or bitcoin
-    from "https://www.coingecko.com/en/public-companies-{bitcoin/ethereum}" [Source: CoinGecko]
-
-    Parameters
-    ----------
-    endpoint : str
-        "bitcoin" or "ethereum"
-
-    Returns
-    -------
-    pandas.DataFrame
-        Rank, Company, Ticker, Country, Total_Btc, Entry_Value, Today_Value, Pct_Supply, Url
-    """
-
-    url = f"https://www.coingecko.com/en/public-companies-{endpoint}"
-    rows = scrape_gecko_data(url).find("tbody").find_all("tr")
-    results = []
-    for row in rows:
-        link = row.find("a")["href"]
-        row_cleaned = clean_row(row)
-        row_cleaned.append(link)
-        results.append(row_cleaned)
-    df = pd.DataFrame(
-        results,
-        columns=[
-            "Rank",
-            "Company",
-            "Ticker",
-            "Country",
-            "Total_Btc",
-            "Entry_Value",
-            "Today_Value",
-            "Pct_Supply",
-            "Url",
-        ],
-    )
-    return df
-
-
-def get_news(n: int = 100) -> pd.DataFrame:
-    """Scrapes news from "https://www.coingecko.com/en/news?page={}" [Source: CoinGecko]
-
-    Parameters
-    ----------
-    n: int
-        Number of news, by default n=100, one page has 25 news, so 4 pages are scraped.
-    Returns
-    -------
-    pandas.DataFrame:
-        Title, Author, Posted, Article
-    """
-
-    n_of_pages = (math.ceil(n / 25) + 1) if n else 2
-    dfs = []
-    for page in range(1, n_of_pages):
-        url = f"https://www.coingecko.com/en/news?page={page}"
-        rows = scrape_gecko_data(url).find_all("article")
-        results = []
-        for row in rows:
-            header = row.find("header")
-            link = header.find("a")["href"]
-            text = [t for t in header.text.strip().split("\n") if t not in ["", " "]]
-            article = row.find("div", class_="post-body").text.strip()
-            title, *by_who = text
-            author, posted = " ".join(by_who).split("(")
-            posted = posted.strip().replace(")", "")
-            results.append([title, author.strip(), posted, article, link])
-        dfs.append(
-            pd.DataFrame(
-                results,
-                columns=[
-                    "Title",
-                    "Author",
-                    "Posted",
-                    "Article",
-                    "Url",
-                ],
-            )
+    df.columns = list(
+        map(
+            lambda x: replace_underscores_in_column_names(x)
+            if isinstance(x, str)
+            else x,
+            df.columns,
         )
-    df = pd.concat(dfs, ignore_index=True).head(n)
-    df.drop("Article", axis=1, inplace=True)
-    df.index = df.index + 1
-    df.reset_index(inplace=True)
-    df.rename(columns={"index": "Index"}, inplace=True)
-    return df
+    )
+
+    return [stats_str, df]
 
 
-def get_top_crypto_categories() -> pd.DataFrame:
-    """Scrapes top crypto categories from "https://www.coingecko.com/en/categories" [Source: CoinGecko]
+SORT_VALUES = [
+    "market_cap_desc",
+    "market_cap_asc",
+    "name_desc",
+    "name_asc",
+    "market_cap_change_24h_desc",
+    "market_cap_change_24h_asc",
+]
+
+
+@log_start_end(log=logger)
+def coin_formatter(n):
+    # TODO: can be improved
+    coins = []
+    re_str = "small/(.*)(.jpg|.png|.JPG|.PNG)"
+    for coin in n:
+        if re.search(re_str, coin):
+            coin_stripped = re.search(re_str, coin).group(1)
+            coins.append(coin_stripped)
+    return ",".join(coins)
+
+
+@log_start_end(log=logger)
+def get_top_crypto_categories(sort_filter: str = SORT_VALUES[0]) -> pd.DataFrame:
+    """Returns top crypto categories [Source: CoinGecko]
 
     Returns
     -------
     pandas.DataFrame
        Rank, Name, Change_1h, Change_7d, Market_Cap, Volume_24h,Coins, Url
     """
-
-    columns = [
-        "Rank",
-        "Name",
-        "Change_1h",
-        "Change_24h",
-        "Change_7d",
-        "Market_Cap",
-        "Volume_24h",
-        "Coins",
-        "Url",
-    ]
-    url = "https://www.coingecko.com/en/categories"
-    rows = scrape_gecko_data(url).find("tbody").find_all("tr")
-    results = []
-    for row in rows:
-        url = GECKO_BASE_URL + row.find("a")["href"]
-        (
-            rank,
-            *names,
-            change_1h,
-            change_24h,
-            change_7d,
-            market_cap,
-            volume,
-            n_of_coins,
-        ) = row.text.strip().split()
-        results.append(
-            [
-                rank,
-                " ".join(names),
-                change_1h,
-                change_24h,
-                change_7d,
-                market_cap,
-                volume,
-                n_of_coins,
-                url,
-            ]
-        )
-
-    df = pd.DataFrame(results, columns=columns)
-    df["Rank"] = df["Rank"].astype(int)
-    return df
+    if sort_filter in SORT_VALUES:
+        client = CoinGeckoAPI()
+        data = client.get_coins_categories()
+        df = pd.DataFrame(data)
+        del df["id"]
+        del df["content"]
+        del df["updated_at"]
+        df["top_3_coins"] = df["top_3_coins"].apply(coin_formatter)
+        df.columns = [
+            replace_underscores_in_column_names(col) if isinstance(col, str) else col
+            for col in df.columns
+        ]
+        return df
+    return pd.DataFrame()
 
 
-def get_stable_coins() -> pd.DataFrame:
-    """Scrapes stable coins data from "https://www.coingecko.com/en/stablecoins" [Source: CoinGecko]
+# TODO: add string with overview
+@log_start_end(log=logger)
+def get_stable_coins(top: int = 20) -> pd.DataFrame:
+    """Returns top stable coins [Source: CoinGecko]
 
     Returns
     -------
@@ -204,118 +188,11 @@ def get_stable_coins() -> pd.DataFrame:
         Rank, Name, Symbol, Price, Change_24h, Exchanges, Market_Cap, Change_30d, Url
     """
 
-    columns = [
-        "Rank",
-        "Name",
-        "Symbol",
-        "Price",
-        "Change_24h",
-        "Exchanges",
-        "Market_Cap",
-        "Change_30d",
-        "Url",
-    ]
-    url = "https://www.coingecko.com/en/stablecoins"
-    rows = scrape_gecko_data(url).find("tbody").find_all("tr")
-    results = []
-    for row in rows:
-        link = GECKO_BASE_URL + row.find("a")["href"]
-        row_cleaned = clean_row(row)
-        if len(row_cleaned) == 8:
-            row_cleaned.append(None)
-
-        (
-            rank,
-            name,
-            *symbols,
-            price,
-            volume_24h,
-            exchanges,
-            market_cap,
-            change_30d,
-        ) = row_cleaned
-        symbol = symbols[0] if symbols else symbols
-        results.append(
-            [
-                rank,
-                name,
-                symbol,
-                price,
-                volume_24h,
-                exchanges,
-                market_cap,
-                change_30d,
-                link,
-            ]
-        )
-    df = replace_qm(pd.DataFrame(results, columns=columns))
-    df.drop("Rank", axis=1, inplace=True)
-    create_df_index(df, "Rank")
-    df["Price"] = df["Price"].apply(lambda x: float(x.strip("$").replace(",", "")))
-    return df
+    df = get_coins(top=top, category="stablecoins")
+    return df[COINS_COLUMNS]
 
 
-def get_nft_of_the_day() -> pd.DataFrame:
-    """Scrapes data about nft of the day. [Source: CoinGecko]
-
-    Returns
-    -------
-    pandas.DataFrame
-        metric, value
-    """
-
-    url = "https://www.coingecko.com/en/nft"
-    soup = scrape_gecko_data(url)
-    row = soup.find("div", class_="tw-px-4 tw-py-5 sm:tw-p-6")
-    try:
-        *author, description, _ = clean_row(row)
-        if len(author) > 3:
-            author, description = author[:3], author[3]
-    except (ValueError, IndexError):
-        return pd.DataFrame()
-    df = (
-        pd.Series(
-            {
-                "author": " ".join(author),
-                "desc": description,
-                "url": GECKO_BASE_URL + row.find("a")["href"],
-                "img": row.find("img")["src"],
-            }
-        )
-        .to_frame()
-        .reset_index()
-    )
-    df.columns = ["Metric", "Value"]
-    df["Metric"] = df["Metric"].apply(
-        lambda x: replace_underscores_in_column_names(x) if isinstance(x, str) else x
-    )
-    df = wrap_text_in_df(df, w=100)
-    return df
-
-
-def get_nft_market_status() -> pd.DataFrame:
-    """Scrapes overview data of nft markets from "https://www.coingecko.com/en/nft" [Source: CoinGecko]
-
-    Returns
-    -------
-    pandas.DataFrame
-        Metric, Value
-    """
-
-    url = "https://www.coingecko.com/en/nft"
-    rows = scrape_gecko_data(url).find_all(
-        "span", class_="overview-box d-inline-block p-3 mr-2"
-    )
-    kpis = {}
-    for row in rows:
-        value, *kpi = clean_row(row)
-        name = " ".join(kpi)
-        kpis[name] = value
-    df = pd.Series(kpis).to_frame().reset_index()
-    df.columns = ["Metric", "Value"]
-    return df
-
-
+@log_start_end(log=logger)
 def get_exchanges() -> pd.DataFrame:
     """Get list of top exchanges from CoinGecko API [Source: CoinGecko]
 
@@ -352,6 +229,7 @@ def get_exchanges() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_financial_platforms() -> pd.DataFrame:
     """Get list of financial platforms from CoinGecko API [Source: CoinGecko]
 
@@ -369,6 +247,7 @@ def get_financial_platforms() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_finance_products() -> pd.DataFrame:
     """Get list of financial products from CoinGecko API
 
@@ -393,6 +272,7 @@ def get_finance_products() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_indexes() -> pd.DataFrame:
     """Get list of crypto indexes from CoinGecko API [Source: CoinGecko]
 
@@ -409,6 +289,7 @@ def get_indexes() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_derivatives() -> pd.DataFrame:
     """Get list of crypto derivatives from CoinGecko API [Source: CoinGecko]
 
@@ -428,7 +309,9 @@ def get_derivatives() -> pd.DataFrame:
 
     df.rename(columns={"price_percentage_change_24h": "pct_change_24h"}, inplace=True)
     create_df_index(df, "rank")
-    df["price"] = df["price"].apply(lambda x: float(x.strip("$").replace(",", "")))
+    df["price"] = df["price"].apply(
+        lambda x: "" if not x else float(x.strip("$").replace(",", ""))
+    )
 
     df.columns = [
         "Rank",
@@ -445,6 +328,7 @@ def get_derivatives() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_exchange_rates() -> pd.DataFrame:
     """Get list of crypto, fiats, commodity exchange rates from CoinGecko API [Source: CoinGecko]
 
@@ -462,6 +346,7 @@ def get_exchange_rates() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_global_info() -> pd.DataFrame:
     """Get global statistics about crypto from CoinGecko API like:
         - market cap change
@@ -481,11 +366,11 @@ def get_global_info() -> pd.DataFrame:
     results = client.get_global()
 
     total_mcap = results.pop("market_cap_percentage")
-    eth, btc = total_mcap.get("btc"), total_mcap.get("eth")
+    btc, eth = total_mcap.get("btc"), total_mcap.get("eth")
     for key in ["total_market_cap", "total_volume", "updated_at"]:
         del results[key]
-    results["eth_market_cap_in_pct"] = eth
     results["btc_market_cap_in_pct"] = btc
+    results["eth_market_cap_in_pct"] = eth
     results["altcoin_market_cap_in_pct"] = 100 - (float(eth) + float(btc))
     df = pd.Series(results).reset_index()
     df.columns = ["Metric", "Value"]
@@ -495,6 +380,7 @@ def get_global_info() -> pd.DataFrame:
     return df
 
 
+@log_start_end(log=logger)
 def get_global_markets_info() -> pd.DataFrame:
     """Get global statistics about crypto markets from CoinGecko API like:
         Market_Cap, Volume, Market_Cap_Percentage
@@ -523,6 +409,7 @@ def get_global_markets_info() -> pd.DataFrame:
     return df.reset_index()
 
 
+@log_start_end(log=logger)
 def get_global_defi_info() -> pd.DataFrame:
     """Get global statistics about Decentralized Finances [Source: CoinGecko]
 

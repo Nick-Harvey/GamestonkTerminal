@@ -1,17 +1,23 @@
 """Reddit Model"""
 __docformat__ = "numpy"
 
-from typing import List, Dict, Tuple
+import logging
 from datetime import datetime, timedelta
-import pandas as pd
-from prawcore.exceptions import ResponseException
-from requests import HTTPError
-from psaw import PushshiftAPI
-import praw
-import finviz
-from gamestonk_terminal import config_terminal as cfg
+from typing import Dict, List, Tuple
 
+import finviz
+import pandas as pd
+import praw
+from prawcore.exceptions import ResponseException
+from psaw import PushshiftAPI
+from requests import HTTPError
+
+from gamestonk_terminal import config_terminal as cfg
 from gamestonk_terminal.common.behavioural_analysis.reddit_helpers import find_tickers
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 l_sub_reddits = [
     "Superstonk",
@@ -27,6 +33,7 @@ l_sub_reddits = [
 # pylint:disable=inconsistent-return-statements
 
 
+@log_start_end(log=logger)
 def get_watchlists(
     n_to_get: int,
 ) -> Tuple[List[praw.models.reddit.submission.Submission], Dict, int]:
@@ -95,6 +102,7 @@ def get_watchlists(
     return subs, d_watchlist_tickers, n_flair_posts_found
 
 
+@log_start_end(log=logger)
 def get_popular_tickers(
     n_top: int, posts_to_look_at: int, subreddits: str = ""
 ) -> pd.DataFrame:
@@ -131,7 +139,7 @@ def get_popular_tickers(
 
     psaw_api = PushshiftAPI()
     for s_sub_reddit in sub_reddit_list:
-        print(
+        console.print(
             f"Search for latest tickers for {posts_to_look_at} '{s_sub_reddit}' posts"
         )
         submissions = psaw_api.search_submissions(
@@ -172,12 +180,12 @@ def get_popular_tickers(
                                 d_watchlist_tickers[key] = 1
 
             except ResponseException:
-                print(
+                console.print(
                     "Received a response from Reddit with an authorization error. check your token.\n"
                 )
                 return pd.DataFrame()
 
-        print(f"  {n_tickers} potential tickers found.")
+        console.print(f"  {n_tickers} potential tickers found.")
     lt_watchlist_sorted = sorted(
         d_watchlist_tickers.items(), key=lambda item: item[1], reverse=True
     )
@@ -208,9 +216,9 @@ def get_popular_tickers(
                 n_top_stocks += 1
             except HTTPError as e:
                 if e.response.status_code != 404:
-                    print(f"Unexpected exception from Finviz: {e}")
+                    console.print(f"Unexpected exception from Finviz: {e}")
             except Exception as e:
-                print(e, "\n")
+                console.print(e, "\n")
                 return
 
         popular_tickers_df = pd.DataFrame(
@@ -229,6 +237,7 @@ def get_popular_tickers(
     return popular_tickers_df
 
 
+@log_start_end(log=logger)
 def get_spac_community(
     limit: int, popular: bool
 ) -> Tuple[List[praw.models.reddit.submission.Submission], Dict]:
@@ -298,6 +307,7 @@ def get_spac_community(
     return subs, d_watchlist_tickers
 
 
+@log_start_end(log=logger)
 def get_spac(
     limit: int = 5,
 ) -> Tuple[List[praw.models.reddit.submission.Submission], Dict, int]:
@@ -374,6 +384,7 @@ def get_spac(
     return subs, d_watchlist_tickers, n_flair_posts_found
 
 
+@log_start_end(log=logger)
 def get_wsb_community(
     limit: int = 10, new: bool = False
 ) -> List[praw.models.reddit.submission.Submission]:
@@ -415,6 +426,7 @@ def get_wsb_community(
     return subs
 
 
+@log_start_end(log=logger)
 def get_due_dilligence(
     ticker: str, limit: int = 5, n_days: int = 3, show_all_flairs: bool = False
 ) -> List[praw.models.reddit.submission.Submission]:

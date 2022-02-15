@@ -1,11 +1,12 @@
-import os
 import datetime
-import matplotlib.pyplot as plt
-import discord
+import os
 
-from gamestonk_terminal.economy import cnn_view, cnn_model
+import disnake
+import matplotlib.pyplot as plt
+
 import discordbot.config_discordbot as cfg
-from discordbot.run_discordbot import gst_imgur
+from discordbot.config_discordbot import gst_imgur, logger
+from gamestonk_terminal.economy import cnn_model, cnn_view
 
 
 async def feargreed_command(ctx, indicator=""):
@@ -14,14 +15,14 @@ async def feargreed_command(ctx, indicator=""):
     try:
         # Debug user input
         if cfg.DEBUG:
-            print(f"\n!economy.feargreed {indicator}")
+            logger.debug("econ-futures")
 
         # Check for argument
         possible_indicators = ("", "jbd", "mv", "pco", "mm", "sps", "spb", "shd")
 
         if indicator not in possible_indicators:
             raise Exception(
-                f"Select a valid indicator from {', '.join(possible_indicators)}"
+                f"Select a valid indicator from {', '.join(possible_indicators)}"  # nosec
             )
 
         # Retrieve data
@@ -51,7 +52,7 @@ async def feargreed_command(ctx, indicator=""):
             )
             i += 1
 
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="Economy: [CNN] Fear Geed Index",
             description=report,
             colour=cfg.COLOR,
@@ -68,13 +69,13 @@ async def feargreed_command(ctx, indicator=""):
             embed.set_image(url=uploaded_image.link)
 
         else:
-            if cfg.DEBUG:
-                print("Error with uploading the the image to Imgur.")
+            logger.error("Error when uploading the the image to Imgur.")
 
         await ctx.send(embed=embed)
 
     except Exception as e:
-        embed = discord.Embed(
+        logger.error("ERROR Economy: [CNN] Feargreed. %s", e)
+        embed = disnake.Embed(
             title="ERROR Economy: [CNN] Feargreed",
             colour=cfg.COLOR,
             description=e,
@@ -84,4 +85,4 @@ async def feargreed_command(ctx, indicator=""):
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

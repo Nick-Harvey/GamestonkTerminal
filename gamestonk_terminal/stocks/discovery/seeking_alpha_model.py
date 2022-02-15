@@ -1,16 +1,22 @@
 """ Seeking Alpha Model """
 __docformat__ = "numpy"
 
-from typing import List, Dict
-from datetime import datetime
+import logging
+from typing import Dict, List
+
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 from pandas.core.frame import DataFrame
 
+from gamestonk_terminal.decorators import log_start_end
 from gamestonk_terminal.helper_funcs import get_user_agent
+from gamestonk_terminal.rich_config import console
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_earnings_html(url_next_earnings: str) -> str:
     """Wraps HTTP requests.get for testibility
 
@@ -31,6 +37,7 @@ def get_earnings_html(url_next_earnings: str) -> str:
     return earnings_html
 
 
+@log_start_end(log=logger)
 def get_next_earnings(pages: int) -> DataFrame:
     """Returns a DataFrame with upcoming earnings
 
@@ -70,6 +77,7 @@ def get_next_earnings(pages: int) -> DataFrame:
     return df_earnings
 
 
+@log_start_end(log=logger)
 def get_articles_html(url_articles: str) -> str:
     """Wraps HTTP requests.get for testibility
 
@@ -90,59 +98,7 @@ def get_articles_html(url_articles: str) -> str:
     return articles_html
 
 
-def get_article_list(start_date: datetime, num: int) -> List[dict]:
-    """Returns a list of latest articles
-
-    Parameters
-    ----------
-    start_date : datetime
-        Starting date
-    num : int
-        Number of articles
-
-    Returns
-    -------
-    list
-        Latest articles list
-    """
-
-    articles: List[dict] = []
-    page = 1
-    url_articles = f"https://seekingalpha.com/market-news/{page}"
-    while len(articles) < num:
-        text_soup_articles = BeautifulSoup(
-            get_articles_html(url_articles),
-            "lxml",
-        )
-
-        for item_row in text_soup_articles.findAll("li", {"class": "item"}):
-            item = item_row.find("a", {"class": "add-source-assigned"})
-            if item is None:
-                continue
-            article_url = item["href"]
-            if not article_url.startswith("/news/"):
-                continue
-            article_id = article_url.split("/")[2].split("-")[0]
-            article_date = datetime.strptime(
-                item_row["data-last-date"], "%Y-%m-%d %H:%M:%S %z"
-            )
-            if start_date.date() < article_date.date():
-                continue
-            articles.append(
-                {
-                    "title": item.text,
-                    "publishedAt": article_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    "url": "https://seekingalpha.com" + article_url,
-                    "id": article_id,
-                }
-            )
-
-        page += 1
-        url_articles = f"https://seekingalpha.com/market-news/{page}"
-
-    return articles
-
-
+@log_start_end(log=logger)
 def get_trending_list(num: int) -> list:
     """Returns a list of trending articles
 
@@ -163,7 +119,7 @@ def get_trending_list(num: int) -> list:
 
     # Check that the API response was successful
     if response.status_code != 200:
-        print("Invalid response\n")
+        console.print("Invalid response\n")
     else:
         for item in response.json():
             article_url = item["uri"]
@@ -182,6 +138,7 @@ def get_trending_list(num: int) -> list:
     return articles[:num]
 
 
+@log_start_end(log=logger)
 def get_article_data(article_id: int) -> dict:
     """Returns an article
 
@@ -212,6 +169,7 @@ def get_article_data(article_id: int) -> dict:
     return article
 
 
+@log_start_end(log=logger)
 def get_news_html(news_type: str = "Top-News") -> dict:
     """Gets news. [Source: SeekingAlpha]
 
@@ -239,6 +197,7 @@ def get_news_html(news_type: str = "Top-News") -> dict:
     return articles_html
 
 
+@log_start_end(log=logger)
 def get_news(news_type: str = "Top-News", num: int = 5) -> List:
     """Gets news. [Source: SeekingAlpha]
 

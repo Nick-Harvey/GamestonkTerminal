@@ -1,24 +1,25 @@
 """Chartexchange view"""
 __docformat__ = "numpy"
 
+import logging
 import os
 
-from tabulate import tabulate
-
-from gamestonk_terminal.helper_funcs import export_data
-from gamestonk_terminal import feature_flags as gtff
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.options import chartexchange_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def display_raw(
-    export: str, ticker: str, date: str, call: bool, price: str, num: int = 20
+    ticker: str, date: str, call: bool, price: str, num: int = 20, export: str = ""
 ) -> None:
     """Return raw stock data[chartexchange]
 
     Parameters
     ----------
-    export : str
-        Export data as CSV, JSON, XLSX
     ticker : str
         Ticker for the given option
     date : str
@@ -29,6 +30,8 @@ def display_raw(
         The strike of the expiration
     num : int
         Number of rows to show
+    export : str
+        Export data as CSV, JSON, XLSX
     """
 
     df = chartexchange_model.get_option_history(ticker, date, call, price)
@@ -40,17 +43,11 @@ def display_raw(
         df,
     )
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df.head(num),
-                headers=df.columns,
-                tablefmt="fancy_grid",
-                showindex=True,
-                floatfmt=".2f",
-            )
-        )
-    else:
-        print(df.to_string(index=False))
+    print_rich_table(
+        df.head(num),
+        headers=list(df.columns),
+        show_index=True,
+        title=f"{ticker.upper()} raw data",
+    )
 
-    print("")
+    console.print()

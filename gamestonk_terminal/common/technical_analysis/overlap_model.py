@@ -1,20 +1,26 @@
 """Overlap Technical Analysis"""
 ___docformat__ = "numpy"
 
+import logging
+
 import pandas as pd
 import pandas_ta as ta
 
+from gamestonk_terminal.decorators import log_start_end
 
-def ema(
-    s_interval: str, df_stock: pd.DataFrame, length: int, offset: int
-) -> pd.DataFrame:
+logger = logging.getLogger(__name__)
+
+WINDOW_LENGTHS = [20, 50]
+WINDOW_LENGTHS2 = [10, 20]
+
+
+@log_start_end(log=logger)
+def ema(values: pd.DataFrame, length: int, offset: int) -> pd.DataFrame:
     """Gets exponential moving average (EMA) for stock
 
     Parameters
     ----------
-    s_interval: str
-        Data interval
-    df_stock: pd.DataFrame
+    values: pd.DataFrame
         Dataframe of dates and prices
     length: int
         Length of EMA window
@@ -23,62 +29,40 @@ def ema(
 
     Returns
     ----------
-    df_ta: pd.DataFrame
+    pd.DataFrame
         Dataframe containing prices and EMA
     """
-    # Daily
-    if s_interval == "1440min":
-        df_ta = ta.ema(df_stock["Adj Close"], length=length, offset=offset).dropna()
-
-    # Intraday
-    else:
-        df_ta = ta.ema(df_stock["Close"], length=length, offset=offset).dropna()
-
-    return pd.DataFrame(df_ta)
+    return pd.DataFrame(ta.ema(values, length=length, offset=offset)).dropna()
 
 
-def sma(
-    s_interval: str, df_stock: pd.DataFrame, length: int, offset: int
-) -> pd.DataFrame:
+@log_start_end(log=logger)
+def sma(values: pd.DataFrame, length: int, offset: int) -> pd.DataFrame:
     """Gets simple moving average (EMA) for stock
 
-    Parameters
-    ----------
-    s_interval: str
-        Data interval
-    df_stock: pd.DataFrame
-        Dataframe of dates and prices
-    length: int
-        Length of SMA window
-    offset: int
-        Length of offset
+     Parameters
+     ----------
+     values: pd.DataFrame
+         Dataframe of dates and prices
+     length: int
+         Length of SMA window
+     offset: int
+         Length of offset
 
-    Returns
-    ----------
-    df_ta: pd.DataFrame
-        Dataframe containing prices and SMA
+     Returns
+     ----------
+    pd.DataFrame
+         Dataframe containing prices and SMA
     """
-    # Daily
-    if s_interval == "1440min":
-        df_ta = ta.sma(df_stock["Adj Close"], length=length, offset=offset).dropna()
-
-    # Intraday
-    else:
-        df_ta = ta.sma(df_stock["Close"], length=length, offset=offset).dropna()
-
-    return pd.DataFrame(df_ta)
+    return pd.DataFrame(ta.sma(values, length=length, offset=offset)).dropna()
 
 
-def wma(
-    s_interval: str, df_stock: pd.DataFrame, length: int, offset: int
-) -> pd.DataFrame:
+@log_start_end(log=logger)
+def wma(values: pd.DataFrame, length: int, offset: int) -> pd.DataFrame:
     """Gets weighted moving average (WMA) for stock
 
     Parameters
     ----------
-    s_interval: str
-        Data interval
-    df_stock: pd.DataFrame
+    values: pd.DataFrame
         Dataframe of dates and prices
     length: int
         Length of SMA window
@@ -90,27 +74,16 @@ def wma(
     df_ta: pd.DataFrame
         Dataframe containing prices and WMA
     """
-    # Daily
-    if s_interval == "1440min":
-        df_ta = ta.wma(df_stock["Adj Close"], length=length, offset=offset).dropna()
-
-    # Intraday
-    else:
-        df_ta = ta.wma(df_stock["Close"], length=length, offset=offset).dropna()
-
-    return pd.DataFrame(df_ta)
+    return pd.DataFrame(ta.wma(values, length=length, offset=offset)).dropna()
 
 
-def hma(
-    s_interval: str, df_stock: pd.DataFrame, length: int, offset: int
-) -> pd.DataFrame:
+@log_start_end(log=logger)
+def hma(values: pd.DataFrame, length: int, offset: int) -> pd.DataFrame:
     """Gets hull moving average (HMA) for stock
 
     Parameters
     ----------
-    s_interval: str
-        Data interval
-    df_stock: pd.DataFrame
+    values: pd.DataFrame
         Dataframe of dates and prices
     length: int
         Length of SMA window
@@ -122,27 +95,16 @@ def hma(
     df_ta: pd.DataFrame
         Dataframe containing prices and HMA
     """
-    # Daily
-    if s_interval == "1440min":
-        df_ta = ta.hma(df_stock["Adj Close"], length=length, offset=offset).dropna()
-
-    # Intraday
-    else:
-        df_ta = ta.hma(df_stock["Close"], length=length, offset=offset).dropna()
-
-    return pd.DataFrame(df_ta)
+    return pd.DataFrame(ta.hma(values, length=length, offset=offset)).dropna()
 
 
-def zlma(
-    s_interval: str, df_stock: pd.DataFrame, length: int, offset: int
-) -> pd.DataFrame:
+@log_start_end(log=logger)
+def zlma(values: pd.DataFrame, length: int, offset: int) -> pd.DataFrame:
     """Gets zero-lagged exponential moving average (ZLEMA) for stock
 
     Parameters
     ----------
-    s_interval: str
-        Data interval
-    df_stock: pd.DataFrame
+    data: pd.DataFrame
         Dataframe of dates and prices
     length: int
         Length of EMA window
@@ -154,17 +116,10 @@ def zlma(
     df_ta: pd.DataFrame
         Dataframe containing prices and EMA
     """
-    # Daily
-    if s_interval == "1440min":
-        df_ta = ta.zlma(df_stock["Adj Close"], length=length, offset=offset).dropna()
-
-    # Intraday
-    else:
-        df_ta = ta.zlma(df_stock["Close"], length=length, offset=offset).dropna()
-
-    return pd.DataFrame(df_ta)
+    return pd.DataFrame(ta.zlma(values, length=length, offset=offset)).dropna()
 
 
+@log_start_end(log=logger)
 def vwap(day_df: pd.DataFrame, offset: int) -> pd.DataFrame:
     """Gets volume weighted average price (VWAP)
 

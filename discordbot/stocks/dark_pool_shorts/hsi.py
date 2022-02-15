@@ -1,24 +1,20 @@
-import discord
-import discordbot.config_discordbot as cfg
-from discordbot.helpers import pagination
+import disnake
+from menus.menu import Menu
 
+import discordbot.config_discordbot as cfg
+from discordbot.config_discordbot import logger
 from gamestonk_terminal.stocks.dark_pool_shorts import shortinterest_model
 
 
-async def hsi_command(ctx, num="10"):
+async def hsi_command(ctx, num: int = 10):
     """Show top high short interest stocks of over 20% ratio [shortinterest.com]"""
 
     try:
         # Debug user input
         if cfg.DEBUG:
-            print(f"\n!stocks.dps.hsi {num}")
+            logger.debug("!stocks.dps.hsi %s", num)
 
         # Check for argument
-        if not num.lstrip("-").isnumeric():
-            raise Exception("Number has to be an integer")
-
-        num = int(num)
-
         if num < 0:
             raise Exception("Number has to be above 0")
 
@@ -28,7 +24,7 @@ async def hsi_command(ctx, num="10"):
 
         # Debug user output
         if cfg.DEBUG:
-            print(df.to_string())
+            logger.debug(df.to_string())
 
         # Output data
         future_column_name = df["Ticker"]
@@ -36,13 +32,20 @@ async def hsi_command(ctx, num="10"):
         df.columns = future_column_name
         df.drop("Ticker")
         columns = []
-        initial_str = "Page 0: Overview"
+        choices = [
+            disnake.SelectOption(label="Overview", value="0", emoji="🟢"),
+        ]
+        initial_str = "Overview"
         i = 1
-        for column in df.columns.values:
-            initial_str = initial_str + "\nPage " + str(i) + ": " + column
+        for col_name in df.columns.values:
+            menu = f"\nPage {i}: {col_name}"
+            initial_str += f"\nPage {i}: {col_name}"
+            choices.append(
+                disnake.SelectOption(label=menu, value=f"{i}", emoji="🟢"),
+            )
             i += 1
         columns.append(
-            discord.Embed(
+            disnake.Embed(
                 title="Stocks: [highshortinterest.com] Top High Short Interest",
                 description=initial_str,
                 colour=cfg.COLOR,
@@ -53,7 +56,7 @@ async def hsi_command(ctx, num="10"):
         )
         for column in df.columns.values:
             columns.append(
-                discord.Embed(
+                disnake.Embed(
                     title="Stocks: [highshortinterest.com] Top High Short Interest",
                     description="```" + df[column].fillna("").to_string() + "```",
                     colour=cfg.COLOR,
@@ -63,10 +66,10 @@ async def hsi_command(ctx, num="10"):
                 )
             )
 
-        await pagination(columns, ctx)
+        await ctx.send(embed=columns[0], view=Menu(columns, choices))
 
     except Exception as e:
-        embed = discord.Embed(
+        embed = disnake.Embed(
             title="ERROR Stocks: [highshortinterest.com] Top High Short Interest",
             colour=cfg.COLOR,
             description=e,
@@ -76,4 +79,4 @@ async def hsi_command(ctx, num="10"):
             icon_url=cfg.AUTHOR_ICON_URL,
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30.0)

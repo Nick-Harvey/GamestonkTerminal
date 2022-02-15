@@ -1,14 +1,18 @@
 """ Market Watch View """
 __docformat__ = "numpy"
 
+import logging
 import os
-from tabulate import tabulate
-from gamestonk_terminal.helper_funcs import export_data
+
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.due_diligence import marketwatch_model
 
-# pylint: disable=too-many-branches
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def sec_filings(ticker: str, num: int, export: str):
     """Display SEC filings for a given stock ticker. [Source: Market Watch]
 
@@ -22,16 +26,13 @@ def sec_filings(ticker: str, num: int, export: str):
         Export dataframe data to csv,json,xlsx file
     """
     df_financials = marketwatch_model.get_sec_filings(ticker)
-    print(
-        tabulate(
-            df_financials.head(num),
-            headers=df_financials.columns,
-            floatfmt=".2f",
-            showindex=True,
-            tablefmt="fancy_grid",
-        )
+    print_rich_table(
+        df_financials.head(num),
+        headers=list(df_financials.columns),
+        show_index=True,
+        title="SEC Filings",
     )
-    print("")
+    console.print("")
 
     export_data(
         export,

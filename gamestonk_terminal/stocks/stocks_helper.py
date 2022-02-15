@@ -1,13 +1,16 @@
 """Main helper"""
 __docformat__ = "numpy"
+
 import argparse
 import json
 from datetime import datetime, timedelta
-from typing import List, Union
+from typing import List, Union, Tuple, Optional
 
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+import numpy as np
 import pandas as pd
+import pandas_market_calendars as mcal
 import plotly.graph_objects as go
 import pyEX
 import pytz
@@ -17,25 +20,27 @@ from alpha_vantage.timeseries import TimeSeries
 from numpy.core.fromnumeric import transpose
 from plotly.subplots import make_subplots
 from scipy import stats
-from tabulate import tabulate
 
-from gamestonk_terminal import config_plot as cfgPlot
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal import config_terminal as cfg
-from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.helper_funcs import (
     parse_known_args_and_warn,
     plot_autoscale,
-    try_except,
+    get_user_timezone_or_invalid,
+    print_rich_table,
 )
+from gamestonk_terminal.rich_config import console
 
 # pylint: disable=no-member,too-many-branches,C0302
 
+INTERVALS = [1, 5, 15, 30, 60]
+SOURCES = ["yf", "av", "iex"]
 
-@try_except
+
 def search(
     query: str,
     amount: int,
-):
+) -> None:
     """Search selected query for tickers.
 
     Parameters
@@ -44,11 +49,6 @@ def search(
         The search term used to find company tickers.
     amount : int
         The amount of companies shown.
-
-    Returns
-    -------
-    tabulate
-        Companies that match the query.
     """
     equities_list = (
         "https://raw.githubusercontent.com/JerBouma/FinanceDatabase/master/"
@@ -72,28 +72,23 @@ def search(
     if equities_dataframe.empty:
         raise ValueError("No companies found. \n")
 
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                equities_dataframe.iloc[:amount],
-                showindex=False,
-                headers=["Company", "Ticker"],
-                tablefmt="fancy_grid",
-            ),
-            "\n",
-        )
-    else:
-        print(equities_dataframe.iloc[:amount].to_string(), "\n")
+    print_rich_table(
+        equities_dataframe.iloc[:amount],
+        show_index=False,
+        headers=["Company", "Ticker"],
+        title="Search Results",
+    )
+    console.print("")
 
 
-@try_except
 def load(
     ticker: str,
-    start: datetime = (datetime.now() - timedelta(days=366)),
+    start: datetime = (datetime.now() - timedelta(days=1100)),
     interval: int = 1440,
     end: datetime = datetime.now(),
     prepost: bool = False,
     source: str = "yf",
+    iexrange: str = "ytd",
 ):
     """
     Load a symbol to perform analysis using the string above as a template. Optional arguments and their
@@ -133,6 +128,8 @@ def load(
         Pre and After hours data
     source: str
         Source of data extracted
+    iexrange: str
+        Timeframe to get IEX data.
 
     Returns
     -------
@@ -164,6 +161,7 @@ def load(
             # Check that loading a stock was not successful
             # pylint: disable=no-member
             if df_stock_candidate.empty:
+                console.print("")
                 return pd.DataFrame()
 
             df_stock_candidate.index = df_stock_candidate.index.tz_localize(None)
@@ -188,6 +186,7 @@ def load(
 
             # Check that loading a stock was not successful
             if df_stock_candidate.empty:
+                console.print("")
                 return pd.DataFrame()
 
             df_stock_candidate.index.name = "date"
@@ -196,171 +195,81 @@ def load(
         elif source == "iex":
             client = pyEX.Client(api_token=cfg.API_IEX_TOKEN, version="v1")
 
-            df_stock_candidate = client.chartDF(ticker)
+            df_stock_candidate = client.chartDF(ticker, timeframe=iexrange)
 
             # Check that loading a stock was not successful
             if df_stock_candidate.empty:
+                console.print("")
                 return pd.DataFrame()
 
             df_stock_candidate = df_stock_candidate[
-                ["uClose", "uHigh", "uLow", "uOpen", "fClose", "volume"]
+                ["close", "fHigh", "fLow", "fOpen", "fClose", "volume"]
             ]
             df_stock_candidate = df_stock_candidate.rename(
                 columns={
-                    "uClose": "Close",
-                    "uHigh": "High",
-                    "uLow": "Low",
-                    "uOpen": "Open",
+                    "close": "Close",
+                    "fHigh": "High",
+                    "fLow": "Low",
+                    "fOpen": "Open",
                     "fClose": "Adj Close",
                     "volume": "Volume",
                 }
             )
 
             df_stock_candidate.sort_index(ascending=True, inplace=True)
-
-            # Slice dataframe from the starting date YYYY-MM-DD selected
-            df_stock_candidate = df_stock_candidate[
-                (df_stock_candidate.index >= start.strftime("%Y-%m-%d"))
-                & (df_stock_candidate.index <= end.strftime("%Y-%m-%d"))
-            ]
-
-        # Check if start time from dataframe is more recent than specified
-        if df_stock_candidate.index[0] > pd.to_datetime(start):
-            s_start = df_stock_candidate.index[0]
-        else:
-            s_start = start
-
+        s_start = df_stock_candidate.index[0]
         s_interval = f"{interval}min"
 
     else:
-        if source == "av":
-            ts = TimeSeries(key=cfg.API_KEY_ALPHAVANTAGE, output_format="pandas")
-            # pylint: disable=unbalanced-tuple-unpacking
-            df_stock_candidate, _ = ts.get_intraday(
-                symbol=ticker,
-                outputsize="full",
-                interval=f"{interval}min",
-            )
 
-            df_stock_candidate.columns = [
-                val.split(". ")[1].capitalize() for val in df_stock_candidate.columns
-            ]
+        s_int = str(interval) + "m"
+        s_interval = s_int + "in"
+        d_granularity = {"1m": 6, "5m": 59, "15m": 59, "30m": 59, "60m": 729}
 
-            df_stock_candidate = df_stock_candidate.rename(
-                columns={
-                    "Adjusted close": "Adj Close",
-                }
-            )
+        s_start_dt = datetime.utcnow() - timedelta(days=d_granularity[s_int])
+        s_date_start = s_start_dt.strftime("%Y-%m-%d")
 
-            s_interval = str(interval) + "min"
-            # Check that loading a stock was not successful
-            # pylint: disable=no-member
-            if df_stock_candidate.empty:
-                return pd.DataFrame()
+        df_stock_candidate = yf.download(
+            ticker,
+            start=s_date_start if s_start_dt > start else start.strftime("%Y-%m-%d"),
+            progress=False,
+            interval=s_int,
+            prepost=prepost,
+        )
 
-            # pylint: disable=no-member
-            df_stock_candidate.sort_index(ascending=True, inplace=True)
+        # Check that loading a stock was not successful
+        if df_stock_candidate.empty:
+            console.print("")
+            return pd.DataFrame()
 
-            # Slice dataframe from the starting date YYYY-MM-DD selected
-            df_stock_candidate = df_stock_candidate[
-                (df_stock_candidate.index >= start.strftime("%Y-%m-%d"))
-                & (df_stock_candidate.index <= end.strftime("%Y-%m-%d"))
-            ]
+        df_stock_candidate.index = df_stock_candidate.index.tz_localize(None)
 
-            # Check if start time from dataframe is more recent than specified
-            if df_stock_candidate.index[0] > pd.to_datetime(start):
-                s_start = df_stock_candidate.index[0]
-            else:
-                s_start = start
+        if s_start_dt > start:
+            s_start = pytz.utc.localize(s_start_dt)
+        else:
+            s_start = start
 
-        elif source == "yf":
-            s_int = str(interval) + "m"
-            s_interval = s_int + "in"
-            d_granularity = {"1m": 6, "5m": 59, "15m": 59, "30m": 59, "60m": 729}
-
-            s_start_dt = datetime.utcnow() - timedelta(days=d_granularity[s_int])
-            s_date_start = s_start_dt.strftime("%Y-%m-%d")
-
-            df_stock_candidate = yf.download(
-                ticker,
-                start=s_date_start
-                if s_start_dt > start
-                else start.strftime("%Y-%m-%d"),
-                progress=False,
-                interval=s_int,
-                prepost=prepost,
-            )
-
-            # Check that loading a stock was not successful
-            if df_stock_candidate.empty:
-                return pd.DataFrame()
-
-            df_stock_candidate.index = df_stock_candidate.index.tz_localize(None)
-
-            if s_start_dt > start:
-                s_start = pytz.utc.localize(s_start_dt)
-            else:
-                s_start = start
-
-            df_stock_candidate.index.name = "date"
-
-        elif source == "iex":
-
-            s_interval = str(interval) + "min"
-            client = pyEX.Client(api_token=cfg.API_IEX_TOKEN, version="v1")
-
-            df_stock_candidate = client.chartDF(ticker)
-
-            df_stock_candidate = client.intradayDF(ticker).iloc[0::interval]
-
-            df_stock_candidate = df_stock_candidate[
-                ["close", "high", "low", "open", "volume", "close"]
-            ]
-            df_stock_candidate.columns = [
-                x.capitalize() for x in df_stock_candidate.columns
-            ]
-
-            df_stock_candidate.columns = list(df_stock_candidate.columns[:-1]) + [
-                "Adj Close"
-            ]
-
-            df_stock_candidate.sort_index(ascending=True, inplace=True)
-
-            new_index = []
-            for idx in range(len(df_stock_candidate)):
-                dt_time = datetime.strptime(df_stock_candidate.index[idx][1], "%H:%M")
-                new_index.append(
-                    df_stock_candidate.index[idx][0]
-                    + timedelta(hours=dt_time.hour, minutes=dt_time.minute)
-                )
-
-            df_stock_candidate.index = pd.DatetimeIndex(new_index)
-            df_stock_candidate.index.name = "date"
-
-            # Slice dataframe from the starting date YYYY-MM-DD selected
-            df_stock_candidate = df_stock_candidate[
-                (df_stock_candidate.index >= start.strftime("%Y-%m-%d"))
-                & (df_stock_candidate.index <= end.strftime("%Y-%m-%d"))
-            ]
-
-            # Check if start time from dataframe is more recent than specified
-            if df_stock_candidate.index[0] > pd.to_datetime(start):
-                s_start = df_stock_candidate.index[0]
-            else:
-                s_start = start
+        df_stock_candidate.index.name = "date"
 
     s_intraday = (f"Intraday {s_interval}", "Daily")[interval == 1440]
 
-    print(
-        f"Loading {s_intraday} {ticker.upper()} stock "
-        f"with starting period {s_start.strftime('%Y-%m-%d')} for analysis.\n"
+    console.print(
+        f"\nLoading {s_intraday} {ticker.upper()} stock "
+        f"with starting period {s_start.strftime('%Y-%m-%d')} for analysis.",
     )
 
     return df_stock_candidate
 
 
 def display_candle(
-    s_ticker: str, df_stock: pd.DataFrame, use_matplotlib: bool, intraday: bool = False
+    s_ticker: str,
+    df_stock: pd.DataFrame,
+    use_matplotlib: bool,
+    intraday: bool = False,
+    add_trend: bool = False,
+    ma: Optional[Tuple[int, ...]] = None,
+    asset_type: str = "Stock",
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """Shows candle plot of loaded ticker. [Source: Yahoo Finance, IEX Cloud or Alpha Vantage]
 
@@ -374,54 +283,75 @@ def display_candle(
         Flag to use matplotlib instead of interactive plotly chart
     intraday: bool
         Flag for intraday data for plotly range breaks
+    add_trend: bool
+        Flag to add high and low trends to chart
+    mov_avg: Tuple[int]
+        Moving averages to add to the candle
+    asset_type_: str
+        String to include in title
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (2 axes are expected in the list), by default None
+    asset_type_: str
+        String to include in title
     """
-    if (df_stock.index[1] - df_stock.index[0]).total_seconds() >= 86400:
-        df_stock = find_trendline(df_stock, "OC_High", "high")
-        df_stock = find_trendline(df_stock, "OC_Low", "low")
+    if add_trend:
+        if (df_stock.index[1] - df_stock.index[0]).total_seconds() >= 86400:
+            df_stock = find_trendline(df_stock, "OC_High", "high")
+            df_stock = find_trendline(df_stock, "OC_Low", "low")
 
     if use_matplotlib:
-        mc = mpf.make_marketcolors(
-            up="green",
-            down="red",
-            edge="black",
-            wick="black",
-            volume="in",
-            ohlc="i",
-        )
-
-        s = mpf.make_mpf_style(marketcolors=mc, gridstyle=":", y_on_right=True)
-
         ap0 = []
+        if add_trend:
+            if "OC_High_trend" in df_stock.columns:
+                ap0.append(
+                    mpf.make_addplot(df_stock["OC_High_trend"], color=theme.up_color),
+                )
 
-        if "OC_High_trend" in df_stock.columns:
-            ap0.append(
-                mpf.make_addplot(df_stock["OC_High_trend"], color="g"),
+            if "OC_Low_trend" in df_stock.columns:
+                ap0.append(
+                    mpf.make_addplot(df_stock["OC_Low_trend"], color=theme.down_color),
+                )
+
+        candle_chart_kwargs = {
+            "type": "candle",
+            "style": theme.mpf_style,
+            "volume": True,
+            "addplot": ap0,
+            "xrotation": theme.xticks_rotation,
+            "scale_padding": {"left": 0.3, "right": 1, "top": 0.8, "bottom": 0.8},
+            "update_width_config": {
+                "candle_linewidth": 0.6,
+                "candle_width": 0.8,
+                "volume_linewidth": 0.8,
+                "volume_width": 0.8,
+            },
+            "warn_too_much_data": 10000,
+        }
+
+        kwargs = {"mav": ma} if ma else {}
+
+        if external_axes is None:
+            candle_chart_kwargs["returnfig"] = True
+            candle_chart_kwargs["figratio"] = (10, 7)
+            candle_chart_kwargs["figscale"] = 1.10
+            candle_chart_kwargs["figsize"] = plot_autoscale()
+            fig, _ = mpf.plot(df_stock, **candle_chart_kwargs, **kwargs)
+            fig.suptitle(
+                f"{asset_type} {s_ticker}",
+                x=0.055,
+                y=0.965,
+                horizontalalignment="left",
             )
 
-        if "OC_Low_trend" in df_stock.columns:
-            ap0.append(
-                mpf.make_addplot(df_stock["OC_Low_trend"], color="b"),
-            )
+            theme.visualize_output(force_tight_layout=False)
+        else:
+            if len(external_axes) != 1:
+                console.print("[red]Expected list of 1 axis items./n[/red]")
+                return
+            (ax1,) = external_axes
+            candle_chart_kwargs["ax"] = ax1
+            mpf.plot(df_stock, **candle_chart_kwargs)
 
-        if gtff.USE_ION:
-            plt.ion()
-
-        mpf.plot(
-            df_stock,
-            type="candle",
-            mav=(20, 50),
-            volume=True,
-            title=f"\nStock {s_ticker}",
-            addplot=ap0,
-            xrotation=10,
-            style=s,
-            figratio=(10, 7),
-            figscale=1.10,
-            figsize=(plot_autoscale()),
-            update_width_config=dict(
-                candle_linewidth=1.0, candle_width=0.8, volume_linewidth=1.0
-            ),
-        )
     else:
         fig = make_subplots(
             rows=2,
@@ -443,60 +373,70 @@ def display_candle(
             row=1,
             col=1,
         )
-        fig.add_trace(
-            go.Scatter(
-                x=df_stock.index,
-                y=df_stock["ma20"],
-                name="MA20",
-                mode="lines",
-                line=go.scatter.Line(color="royalblue"),
-            ),
-            row=1,
-            col=1,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df_stock.index,
-                y=df_stock["ma50"],
-                name="MA50",
-                mode="lines",
-                line=go.scatter.Line(color="black"),
-            ),
-            row=1,
-            col=1,
-        )
+        if ma:
+            plotly_colors = [
+                "black",
+                "teal",
+                "blue",
+                "purple",
+                "orange",
+                "gray",
+                "deepskyblue",
+            ]
+            for idx, ma_val in enumerate(ma):
+                temp = df_stock["Adj Close"].copy()
+                temp[f"ma{ma_val}"] = df_stock["Adj Close"].rolling(ma_val).mean()
+                temp = temp.dropna()
+                fig.add_trace(
+                    go.Scatter(
+                        x=temp.index,
+                        y=temp[f"ma{ma_val}"],
+                        name=f"MA{ma_val}",
+                        mode="lines",
+                        line=go.scatter.Line(
+                            color=plotly_colors[np.mod(idx, len(plotly_colors))]
+                        ),
+                    ),
+                    row=1,
+                    col=1,
+                )
 
-        if "OC_High_trend" in df_stock.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_stock.index,
-                    y=df_stock["OC_High_trend"],
-                    name="High Trend",
-                    mode="lines",
-                    line=go.scatter.Line(color="green"),
-                ),
-                row=1,
-                col=1,
-            )
-        if "OC_Low_trend" in df_stock.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_stock.index,
-                    y=df_stock["OC_Low_trend"],
-                    name="Low Trend",
-                    mode="lines",
-                    line=go.scatter.Line(color="red"),
-                ),
-                row=1,
-                col=1,
-            )
+        if add_trend:
+            if "OC_High_trend" in df_stock.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_stock.index,
+                        y=df_stock["OC_High_trend"],
+                        name="High Trend",
+                        mode="lines",
+                        line=go.scatter.Line(color="green"),
+                    ),
+                    row=1,
+                    col=1,
+                )
+            if "OC_Low_trend" in df_stock.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_stock.index,
+                        y=df_stock["OC_Low_trend"],
+                        name="Low Trend",
+                        mode="lines",
+                        line=go.scatter.Line(color="red"),
+                    ),
+                    row=1,
+                    col=1,
+                )
 
+        colors = [
+            "red" if row.Open < row["Adj Close"] else "green"
+            for _, row in df_stock.iterrows()
+        ]
         fig.add_trace(
             go.Bar(
                 x=df_stock.index,
                 y=df_stock.Volume,
                 name="Volume",
-                marker_color="#696969",
+                marker_color=colors,
             ),
             row=2,
             col=1,
@@ -534,16 +474,34 @@ def display_candle(
                 type="date",
             ),
         )
+
+        fig.update_layout(
+            updatemenus=[
+                dict(
+                    buttons=[
+                        dict(
+                            label="linear",
+                            method="relayout",
+                            args=[{"yaxis.type": "linear"}],
+                        ),
+                        dict(
+                            label="log", method="relayout", args=[{"yaxis.type": "log"}]
+                        ),
+                    ]
+                )
+            ]
+        )
+
         if intraday:
             fig.update_xaxes(
                 rangebreaks=[
                     dict(bounds=["sat", "mon"]),
-                    dict(bounds=[16, 9.5], pattern="hour"),
+                    dict(bounds=[20, 9], pattern="hour"),
                 ]
             )
 
-        fig.show()
-    print("")
+        fig.show(config=dict({"scrollZoom": True}))
+    console.print("")
 
 
 def quote(other_args: List[str], s_ticker: str):
@@ -578,7 +536,7 @@ def quote(other_args: List[str], s_ticker: str):
             "--ticker",
             action="store",
             dest="s_ticker",
-            required=True,
+            required="-h" not in other_args,
             help="Stock ticker",
         )
 
@@ -594,21 +552,23 @@ def quote(other_args: List[str], s_ticker: str):
 
     try:
         # For the case where a user uses: 'quote BB'
-        if other_args and "-" not in other_args[0]:
+        if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-t")
         ns_parser = parse_known_args_and_warn(parser, other_args)
         if not ns_parser:
             return
 
     except SystemExit:
-        print("")
+        console.print("")
         return
 
     ticker = yf.Ticker(ns_parser.s_ticker)
 
     # If price only option, return immediate market price for ticker.
     if ns_parser.price_only:
-        print(f"Price of {ns_parser.s_ticker} {ticker.info['regularMarketPrice']} \n")
+        console.print(
+            f"Price of {ns_parser.s_ticker} {ticker.info['regularMarketPrice']} \n"
+        )
         return
 
     try:
@@ -651,142 +611,13 @@ def quote(other_args: List[str], s_ticker: str):
 
         quote_data = transpose(quote_df)
 
-        print(
-            tabulate(
-                quote_data,
-                headers=quote_data.columns,  # type: ignore
-                tablefmt="fancy_grid",
-                stralign="right",
-            )
-        )
+        print_rich_table(quote_data, title="Ticker Quote", show_index=True)
 
     except KeyError:
-        print(f"Invalid stock ticker: {ns_parser.s_ticker}")
+        console.print(f"Invalid stock ticker: {ns_parser.s_ticker}")
 
-    print("")
+    console.print("")
     return
-
-
-def view(other_args: List[str], s_ticker: str, s_interval: str, df_stock: pd.DataFrame):
-    """Plot loaded ticker
-
-    Parameters
-    ----------
-    other_args : List[str]
-        Argparse arguments
-    s_ticker : str
-        Ticker to load
-    s_interval : str
-        Interval tto get data for
-    df_stock : pd.Dataframe
-        Preloaded dataframe to plot
-    """
-    parser = argparse.ArgumentParser(
-        add_help=False,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        prog="view",
-        description="Visualize historical data of a stock.",
-    )
-
-    try:
-        ns_parser = parse_known_args_and_warn(parser, other_args)
-        if not ns_parser:
-            return
-
-        if not s_ticker:
-            print("No ticker loaded.  First use `load {ticker}`", "\n")
-            return
-
-        # Plot view of the stock
-        plot_view_stock(df_stock, s_ticker, s_interval)
-
-    except Exception as e:
-        print("Error in plotting:")
-        print(e, "\n")
-
-    except SystemExit:
-        print("")
-        return
-
-
-def plot_view_stock(df: pd.DataFrame, symbol: str, interval: str):
-    """
-    Plot the loaded stock dataframe
-    Parameters
-    ----------
-    df: Dataframe
-        Dataframe of prices and volumnes
-    symbol: str
-        Symbol of ticker
-    interval: str
-        Stock data resolution for plotting purposes
-
-    """
-    df.sort_index(ascending=True, inplace=True)
-    bar_colors = ["r" if x[1].Open < x[1].Close else "g" for x in df.iterrows()]
-
-    try:
-        fig, ax = plt.subplots(
-            2,
-            1,
-            gridspec_kw={"height_ratios": [3, 1]},
-            figsize=plot_autoscale(),
-            dpi=cfgPlot.PLOT_DPI,
-        )
-    except Exception as e:
-        print(e)
-        print(
-            "Encountered an error trying to open a chart window. Check your X server configuration."
-        )
-        return
-
-    # In order to make nice Volume plot, make the bar width = interval
-    if interval == "1440min":
-        bar_width = timedelta(days=1)
-        title_string = "Daily"
-    else:
-        bar_width = timedelta(minutes=int(interval.split("m")[0]))
-        title_string = f"{int(interval.split('m')[0])} min"
-
-    ax[0].yaxis.tick_right()
-    if "Adj Close" in df.columns:
-        ax[0].plot(df.index, df["Adj Close"], c=cfgPlot.VIEW_COLOR)
-    else:
-        ax[0].plot(df.index, df["Close"], c=cfgPlot.VIEW_COLOR)
-    ax[0].set_xlim(df.index[0], df.index[-1])
-    ax[0].set_xticks([])
-    ax[0].yaxis.set_label_position("right")
-    ax[0].set_ylabel("Share Price ($)")
-    ax[0].grid(axis="y", color="gainsboro", linestyle="-", linewidth=0.5)
-
-    ax[0].spines["top"].set_visible(False)
-    ax[0].spines["left"].set_visible(False)
-    ax[1].bar(
-        df.index, df.Volume / 1_000_000, color=bar_colors, alpha=0.8, width=bar_width
-    )
-    ax[1].set_xlim(df.index[0], df.index[-1])
-    ax[1].yaxis.tick_right()
-    ax[1].yaxis.set_label_position("right")
-    ax[1].set_ylabel("Volume (1M)")
-    ax[1].grid(axis="y", color="gainsboro", linestyle="-", linewidth=0.5)
-    ax[1].spines["top"].set_visible(False)
-    ax[1].spines["left"].set_visible(False)
-    ax[1].set_xlabel("Time")
-    fig.suptitle(
-        symbol + " " + title_string,
-        size=20,
-        x=0.15,
-        y=0.95,
-        fontfamily="serif",
-        fontstyle="italic",
-    )
-    if gtff.USE_ION:
-        plt.ion()
-    fig.tight_layout(pad=2)
-    plt.setp(ax[1].get_xticklabels(), rotation=20, horizontalalignment="right")
-
-    plt.show()
-    print("")
 
 
 def load_ticker(
@@ -813,6 +644,7 @@ def load_ticker(
     else:
         df_data = yf.download(ticker, start=start_date, progress=False)
 
+    df_data.index = pd.to_datetime(df_data.index)
     df_data["date_id"] = (df_data.index.date - df_data.index.date.min()).astype(
         "timedelta64[D]"
     )
@@ -860,10 +692,8 @@ def find_trendline(
     ----------
     df_data : DataFrame
         The stock ticker data frame with at least date_id, y_key columns.
-
     y_key : str
         Column name to base the trend line on.
-
     high_low: str, optional
         Either "high" or "low". High is the default.
 
@@ -907,3 +737,105 @@ def find_trendline(
     df_data[f"{y_key}_trend"] = reg[0] * df_data["date_id"] + reg[1]
 
     return df_data
+
+
+def additional_info_about_ticker(ticker: str) -> str:
+    """Additional information about trading the ticker such as exchange, currency, timezone and market status
+
+    Parameters
+    ----------
+    ticker : str
+        The stock ticker to extract if stock market is open or not
+
+    Returns
+    -------
+    str
+        Additional information about trading the ticker
+    """
+    extra_info = ""
+    if ticker:
+        # outside US exchange
+        if "." in ticker:
+            ticker_info = yf.Ticker(ticker).info
+
+            extra_info += "\n[param]Datetime: [/param]"
+            if (
+                "exchangeTimezoneName" in ticker_info
+                and ticker_info["exchangeTimezoneName"]
+            ):
+                dtime = datetime.now(
+                    pytz.timezone(ticker_info["exchangeTimezoneName"])
+                ).strftime("%Y %b %d %H:%M")
+                extra_info += dtime
+                extra_info += "\n[param]Timezone: [/param]"
+                extra_info += ticker_info["exchangeTimezoneName"]
+            else:
+                extra_info += "\n[param]Datetime: [/param]"
+                extra_info += "\n[param]Timezone: [/param]"
+
+            extra_info += "\n[param]Exchange: [/param]"
+            if "exchange" in ticker_info and ticker_info["exchange"]:
+                exchange_name = ticker_info["exchange"]
+                extra_info += exchange_name
+
+            extra_info += "\n[param]Currency: [/param]"
+            if "currency" in ticker_info and ticker_info["currency"]:
+                extra_info += ticker_info["currency"]
+
+            extra_info += "\n[param]Market:   [/param]"
+            if "exchange" in ticker_info and ticker_info["exchange"]:
+                if exchange_name in mcal.get_calendar_names():
+                    calendar = mcal.get_calendar(exchange_name)
+                    sch = calendar.schedule(
+                        start_date=(datetime.now() - timedelta(days=3)).strftime(
+                            "%Y-%m-%d"
+                        ),
+                        end_date=(datetime.now() + timedelta(days=3)).strftime(
+                            "%Y-%m-%d"
+                        ),
+                    )
+                    user_tz = get_user_timezone_or_invalid()
+                    if user_tz != "INVALID":
+                        is_market_open = calendar.open_at_time(
+                            sch,
+                            pd.Timestamp(
+                                datetime.now().strftime("%Y-%m-%d %H:%M"), tz=user_tz
+                            ),
+                        )
+                        if is_market_open:
+                            extra_info += "OPEN"
+                        else:
+                            extra_info += "CLOSED"
+        else:
+            extra_info += "\n[param]Datetime: [/param]"
+            dtime = datetime.now(pytz.timezone("America/New_York")).strftime(
+                "%Y %b %d %H:%M"
+            )
+            extra_info += dtime
+            extra_info += "\n[param]Timezone: [/param]America/New_York"
+            extra_info += "\n[param]Currency: [/param]USD"
+            extra_info += "\n[param]Market:   [/param]"
+            calendar = mcal.get_calendar("NYSE")
+            sch = calendar.schedule(
+                start_date=(datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d"),
+                end_date=(datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d"),
+            )
+            user_tz = get_user_timezone_or_invalid()
+            if user_tz != "INVALID":
+                is_market_open = calendar.open_at_time(
+                    sch,
+                    pd.Timestamp(datetime.now().strftime("%Y-%m-%d %H:%M"), tz=user_tz),
+                )
+                if is_market_open:
+                    extra_info += "OPEN"
+                else:
+                    extra_info += "CLOSED"
+
+    else:
+        extra_info += "\n[param]Datetime: [/param]"
+        extra_info += "\n[param]Timezone: [/param]"
+        extra_info += "\n[param]Exchange: [/param]"
+        extra_info += "\n[param]Market: [/param]"
+        extra_info += "\n[param]Currency: [/param]"
+
+    return extra_info + "\n"

@@ -2,31 +2,47 @@
 import json
 import os
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 # IMPORTATION THIRDPARTY
 import pandas as pd
+import pkg_resources
 import pytest
+from _pytest.config.argparsing import Parser
 
-# from pytest_recording._vcr import merge_kwargs
 from _pytest.capture import MultiCapture, SysCapture
 from _pytest.config import Config
 from _pytest.fixtures import SubRequest
 from _pytest.mark.structures import Mark
 
 # IMPORTATION INTERNAL
+from gamestonk_terminal import rich_config
+from gamestonk_terminal import helper_funcs
+
 
 # pylint: disable=redefined-outer-name
+
+DISPLAY_LIMIT: int = 500
+EXTENSIONS_ALLOWED: List[str] = ["csv", "json", "txt"]
+EXTENSIONS_MATCHING: Dict[str, List[Type]] = {
+    "csv": [pd.DataFrame, pd.Series],
+    "json": [bool, dict, float, int, list, tuple],
+    "txt": [str],
+}
 
 
 class Record:
     @staticmethod
     def extract_string(data: Any) -> str:
-        if isinstance(data, str):
+        if isinstance(data, tuple(EXTENSIONS_MATCHING["txt"])):
             string_value = data
-        elif isinstance(data, pd.DataFrame):
-            string_value = data.to_csv(encoding="utf-8", line_terminator="\n")
-        elif isinstance(data, (dict, list, tuple)):
+        elif isinstance(data, tuple(EXTENSIONS_MATCHING["csv"])):
+            string_value = data.to_csv(
+                encoding="utf-8",
+                line_terminator="\n",
+                # date_format="%Y-%m-%d %H:%M:%S",
+            )
+        elif isinstance(data, tuple(EXTENSIONS_MATCHING["json"])):
             string_value = json.dumps(data)
         else:
             raise AttributeError(f"Unsupported type : {type(data)}")
@@ -108,19 +124,10 @@ class Record:
 
 
 class PathTemplate:
-    EXTENSIONS_ALLOWED = ["csv", "json", "txt"]
-    EXTENSIONS_MATCHING = {
-        pd.DataFrame: "csv",
-        str: "txt",
-        tuple: "json",
-        list: "json",
-        dict: "json",
-    }
-
-    @classmethod
-    def find_extension(cls, data: Any):
-        for data_type, extension in cls.EXTENSIONS_MATCHING.items():
-            if isinstance(data, data_type):
+    @staticmethod
+    def find_extension(data: Any):
+        for extension, type_list in EXTENSIONS_MATCHING.items():
+            if isinstance(data, tuple(type_list)):
                 return extension
         raise Exception(f"No extension found for this type : {type(data)}")
 
@@ -130,7 +137,7 @@ class PathTemplate:
         self.__test_name = test_name
 
     def build_path_by_extension(self, extension: str, index: int = 0):
-        if extension not in self.EXTENSIONS_ALLOWED:
+        if extension not in EXTENSIONS_ALLOWED:
             raise Exception(f"Unsupported extension : {extension}")
 
         path = os.path.join(
@@ -153,6 +160,22 @@ class PathTemplate:
 
 class Recorder:
     @property
+    def display_limit(self) -> int:
+        return self.__display_limit
+
+    @display_limit.setter
+    def display_limit(self, display_limit: int):
+        self.__display_limit = display_limit
+
+    @property
+    def rewrite_expected(self) -> bool:
+        return self.__rewrite_expected
+
+    @rewrite_expected.setter
+    def rewrite_expected(self, rewrite_expected: bool):
+        self.__rewrite_expected = rewrite_expected
+
+    @property
     def path_template(self) -> PathTemplate:
         return self.__path_template
 
@@ -168,9 +191,13 @@ class Recorder:
         self,
         path_template: PathTemplate,
         record_mode: str,
+        display_limit: int = DISPLAY_LIMIT,
+        rewrite_expected: bool = False,
     ) -> None:
         self.__path_template = path_template
         self.__record_mode = record_mode
+        self.__display_limit = display_limit
+        self.__rewrite_expected = rewrite_expected
 
         self.__record_list: List[Record] = list()
 
@@ -195,7 +222,13 @@ class Recorder:
         record_list = self.__record_list
 
         for record in record_list:
-            assert not record.record_changed
+            if record.record_changed:
+                raise AssertionError(
+                    "Change detected\n"
+                    f"Record    : {record.record_path}\n"
+                    f"Expected  : {record.recorded[:self.display_limit]}\n"
+                    f"Actual    : {record.captured[:self.display_limit]}\n"
+                )
 
     def assert_in_list(self, in_list: List[str]):
         record_list = self.__record_list
@@ -207,6 +240,7 @@ class Recorder:
     def persist(self):
         record_list = self.__record_list
         record_mode = self.__record_mode
+        rewrite_expected = self.__rewrite_expected
 
         for record in record_list:
             if record_mode == "all":
@@ -225,7 +259,7 @@ class Recorder:
             else:
                 raise Exception(f"Unknown `record-mode` : {record_mode}")
 
-            if save:
+            if save or rewrite_expected:
                 record.persist()
 
 
@@ -257,8 +291,77 @@ def build_path_by_extension(
     return path
 
 
+def merge_markers_kwargs(markers: List[Mark]) -> Dict[str, Any]:
+    """Merge all kwargs into a single dictionary."""
+    kwargs: Dict[str, Any] = dict()
+    for marker in reversed(markers):
+        kwargs.update(marker.kwargs)
+    return kwargs
+
+
+def record_stdout_format_kwargs(
+    test_name: str,
+    record_mode: str,
+    record_stdout_markers: List[Mark],
+) -> Dict[str, Any]:
+    kwargs = merge_markers_kwargs(record_stdout_markers)
+
+    formatted_fields = dict()
+    formatted_fields["assert_in_list"] = kwargs.get("assert_in_list", list())
+    formatted_fields["display_limit"] = kwargs.get("display_limit", DISPLAY_LIMIT)
+    formatted_fields["record_mode"] = kwargs.get("record_mode", record_mode)
+    formatted_fields["record_name"] = kwargs.get("record_name", test_name)
+    formatted_fields["save_record"] = kwargs.get("save_record", True)
+    formatted_fields["strip"] = kwargs.get("strip", True)
+
+    return formatted_fields
+
+
+def pytest_addoption(parser: Parser):
+    parser.addoption(
+        "--prediction",
+        action="store_true",
+        help="To run tests with the marker : @pytest.mark.prediction",
+    )
+    parser.addoption(
+        "--rewrite-expected",
+        action="store_true",
+        help="To force `record_stdout` and `recorder` to rewrite all files.",
+    )
+
+
+def brotli_check():
+    installed_packages = pkg_resources.working_set
+    for item in list(installed_packages):
+        if "brotli" in str(item).lower():
+            pytest.exit("Uninstall brotli and brotlipy before running tests")
+
+
+def disable_rich():
+    rich_config.disable_rich()
+
+    def effect(df, *xargs, **kwargs):  # pylint: disable=unused-argument
+        print(df.to_string())
+
+    helper_funcs.print_rich_table = effect
+
+
+def enable_debug():
+    os.environ["DEBUG_MODE"] = "true"
+
+
 def pytest_configure(config: Config) -> None:
     config.addinivalue_line("markers", "record_stdout: Mark the test as text record.")
+
+    brotli_check()
+    disable_rich()
+    enable_debug()
+
+
+@pytest.fixture(scope="session")  # type: ignore
+def rewrite_expected(request: SubRequest) -> bool:
+    """Force rewriting of all expected data by : `record_stdout` and `recorder`."""
+    return request.config.getoption("--rewrite-expected")
 
 
 @pytest.fixture
@@ -284,34 +387,10 @@ def record_stdout_markers(request: SubRequest) -> List[Mark]:
     return list(request.node.iter_markers(name="record_stdout"))
 
 
-def merge_markers_kwargs(markers: List[Mark]) -> Dict[str, Any]:
-    """Merge all kwargs into a single dictionary to pass to `vcr.use_cassette`."""
-    kwargs: Dict[str, Any] = dict()
-    for marker in reversed(markers):
-        kwargs.update(marker.kwargs)
-    return kwargs
-
-
-def record_stdout_format_kwargs(
-    test_name: str,
-    record_mode: str,
-    record_stdout_markers: List[Mark],
-) -> Dict[str, Any]:
-    kwargs = merge_markers_kwargs(record_stdout_markers)
-
-    formatted_fields = dict()
-    formatted_fields["assert_in_list"] = kwargs.get("assert_in_list", list())
-    formatted_fields["record_mode"] = kwargs.get("record_mode", record_mode)
-    formatted_fields["record_name"] = kwargs.get("record_name", test_name)
-    formatted_fields["save_record"] = kwargs.get("save_record", True)
-    formatted_fields["strip"] = kwargs.get("strip", True)
-
-    return formatted_fields
-
-
 @pytest.fixture(autouse=True)
 def record_stdout(
     disable_recording: bool,
+    rewrite_expected: bool,
     record_stdout_markers: List[Mark],
     record_mode: str,
     request: SubRequest,
@@ -340,7 +419,10 @@ def record_stdout(
             test_name=formatted_kwargs["record_name"],
         )
         recorder = Recorder(
-            path_template=path_template, record_mode=formatted_kwargs["record_mode"]
+            path_template=path_template,
+            record_mode=formatted_kwargs["record_mode"],
+            display_limit=formatted_kwargs["display_limit"],
+            rewrite_expected=rewrite_expected,
         )
 
         # CAPTURE STDOUT
@@ -360,7 +442,8 @@ def record_stdout(
             capsys = request.getfixturevalue("capsys")
             yield
             recorder.capture(
-                captured=capsys.readouterr().out, strip=formatted_kwargs["strip"]
+                captured=capsys.readouterr().out,
+                strip=formatted_kwargs["strip"],
             )
 
         # SAVE/CHECK RECORD
@@ -377,6 +460,7 @@ def record_stdout(
 @pytest.fixture
 def recorder(
     disable_recording: bool,
+    rewrite_expected: bool,
     record_mode: str,
     request: SubRequest,
 ):
@@ -396,7 +480,9 @@ def recorder(
             "You can't combine both of these fixtures : `record_stdout marker`, `recorder`."
         )
     else:
-        recorder = Recorder(path_template, record_mode)
+        recorder = Recorder(
+            path_template, record_mode, rewrite_expected=rewrite_expected
+        )
         yield recorder
         recorder.persist()
         recorder.assert_equal()

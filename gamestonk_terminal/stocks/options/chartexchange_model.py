@@ -1,14 +1,21 @@
 """Chartexchange model"""
 __docformat__ = "numpy"
 
-import requests
+import logging
+
 import pandas as pd
+import requests
 from bs4 import BeautifulSoup
 
-from gamestonk_terminal.stocks.options.op_helpers import convert
+from gamestonk_terminal.decorators import log_start_end
 from gamestonk_terminal.helper_funcs import get_user_agent
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.stocks.options.op_helpers import convert
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def get_option_history(ticker: str, date: str, call: bool, price: str) -> pd.DataFrame:
     """Historic prices for a specific option [chartexchange]
 
@@ -44,18 +51,18 @@ def get_option_history(ticker: str, date: str, call: bool, price: str) -> pd.Dat
             item = row.find_all("div")
             clean_rows.append([x.text for x in item])
     else:
-        print("No data for this option\n")
+        console.print("No data for this option\n")
         return pd.DataFrame()
 
     df = pd.DataFrame()
     df["Date"] = [x[0] for x in clean_rows]
-    df["Open"] = [convert(x[1], ",") for x in clean_rows]
-    df["High"] = [convert(x[2], ",") for x in clean_rows]
-    df["Low"] = [convert(x[3], ",") for x in clean_rows]
-    df["Close"] = [convert(x[4], ",") for x in clean_rows]
-    df["Change"] = [convert(x[5], "%") for x in clean_rows]
-    df["Volume"] = [convert(x[6], ",") for x in clean_rows]
-    df["Open Interest"] = [convert(x[7], ",") for x in clean_rows]
-    df["Change Since"] = [convert(x[8], "%") for x in clean_rows]
+    df["Open"] = [convert(x[2], ",") for x in clean_rows]
+    df["High"] = [convert(x[3], ",") for x in clean_rows]
+    df["Low"] = [convert(x[4], ",") for x in clean_rows]
+    df["Close"] = [convert(x[5], ",") for x in clean_rows]
+    df["Change"] = [convert(x[6], "%") for x in clean_rows]
+    df["Volume"] = [convert(x[7], ",") for x in clean_rows]
+    df["Open Interest"] = [convert(x[8], ",") for x in clean_rows]
+    df["Change Since"] = [convert(x[9], "%") for x in clean_rows]
 
     return df

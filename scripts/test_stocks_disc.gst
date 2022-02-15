@@ -1,0 +1,33 @@
+stocks
+disc
+q
+disc
+..
+disc
+quit
+disc
+help
+h
+?
+rtearn
+pipo
+fipo
+gainers
+losers
+ugs -l 3
+gtech
+active
+ulc
+asc
+ford
+arkord
+upcoming
+trending
+cnews
+lowfloat
+hotpenny
+rtat
+reset
+r
+divcal -l 2
+exit

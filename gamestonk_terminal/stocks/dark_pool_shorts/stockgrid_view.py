@@ -1,19 +1,28 @@
 """ Stockgrid View """
 __docformat__ = "numpy"
 
+import logging
 import os
 from datetime import timedelta
+from typing import List, Optional
+
 import matplotlib.pyplot as plt
-from tabulate import tabulate
+
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
-from gamestonk_terminal.feature_flags import USE_ION
-from gamestonk_terminal.stocks.dark_pool_shorts import stockgrid_model
+from gamestonk_terminal.decorators import log_start_end
 from gamestonk_terminal.helper_funcs import (
-    plot_autoscale,
     export_data,
+    plot_autoscale,
+    print_rich_table,
 )
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.stocks.dark_pool_shorts import stockgrid_model
+
+logger = logging.getLogger(__name__)
 
 
+@log_start_end(log=logger)
 def dark_pool_short_positions(num: int, sort_field: str, ascending: bool, export: str):
     """Get dark pool short positions. [Source: Stockgrid]
 
@@ -52,17 +61,13 @@ def dark_pool_short_positions(num: int, sort_field: str, ascending: bool, export
     ]
 
     # Assuming that the datetime is the same, which from my experiments seems to be the case
-    print(f"The following data corresponds to the date: {dp_date}")
-    print(
-        tabulate(
-            df.iloc[:num],
-            tablefmt="fancy_grid",
-            floatfmt=".2f",
-            headers=list(df.columns),
-            showindex=False,
-        )
+    print_rich_table(
+        df.iloc[:num],
+        headers=list(df.columns),
+        show_index=False,
+        title=f"Data for: {dp_date}",
     )
-    print("")
+    console.print("")
 
     export_data(
         export,
@@ -72,6 +77,7 @@ def dark_pool_short_positions(num: int, sort_field: str, ascending: bool, export
     )
 
 
+@log_start_end(log=logger)
 def short_interest_days_to_cover(num: int, sort_field: str, export: str):
     """Print short interest and days to cover. [Source: Stockgrid]
 
@@ -99,17 +105,13 @@ def short_interest_days_to_cover(num: int, sort_field: str, export: str):
     ]
 
     # Assuming that the datetime is the same, which from my experiments seems to be the case
-    print(f"The following data corresponds to the date: {dp_date}")
-    print(
-        tabulate(
-            df.iloc[:num],
-            tablefmt="fancy_grid",
-            floatfmt=".2f",
-            headers=list(df.columns),
-            showindex=False,
-        )
+    print_rich_table(
+        df.iloc[:num],
+        headers=list(df.columns),
+        show_index=False,
+        title=f"Data for: {dp_date}",
     )
-    print("")
+    console.print("")
 
     export_data(
         export,
@@ -119,7 +121,14 @@ def short_interest_days_to_cover(num: int, sort_field: str, export: str):
     )
 
 
-def short_interest_volume(ticker: str, num: int, raw: bool, export: str):
+@log_start_end(log=logger)
+def short_interest_volume(
+    ticker: str,
+    num: int,
+    raw: bool,
+    export: str,
+    external_axes: Optional[List[plt.Axes]] = None,
+):
     """Plot price vs short interest volume. [Source: Stockgrid]
 
     Parameters
@@ -132,6 +141,9 @@ def short_interest_volume(ticker: str, num: int, raw: bool, export: str):
         Flag to print raw data instead
     export : str
         Export dataframe data to csv,json,xlsx file
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (3 axis is expected in the list), by default None
+
     """
     df, prices = stockgrid_model.get_short_interest_volume(ticker)
 
@@ -155,85 +167,90 @@ def short_interest_volume(ticker: str, num: int, raw: bool, export: str):
 
         df.date = df.date.dt.date
 
-        print(
-            tabulate(
-                df.iloc[:num],
-                tablefmt="fancy_grid",
-                floatfmt=".2f",
-                headers=list(df.columns),
-                showindex=False,
-            )
+        print_rich_table(
+            df.iloc[:num],
+            headers=list(df.columns),
+            show_index=False,
+            title="Price vs Short Volume",
         )
     else:
-        _, axes = plt.subplots(
-            2,
-            1,
-            figsize=(plot_autoscale()),
-            dpi=PLOT_DPI,
-            gridspec_kw={"height_ratios": [2, 1]},
-        )
 
-        axes[0].bar(
+        # This plot has 3 axis
+        if not external_axes:
+            _, (ax, ax1) = plt.subplots(
+                2,
+                1,
+                sharex=True,
+                figsize=plot_autoscale(),
+                dpi=PLOT_DPI,
+                gridspec_kw={"height_ratios": [2, 1]},
+            )
+            ax2 = ax.twinx()
+        else:
+            if len(external_axes) != 3:
+                console.print("[red]Expected list of three axis item./n[/red]")
+                return
+            (ax, ax1, ax2) = external_axes
+
+        ax.bar(
             df["date"],
             df["total_volume"] / 1_000_000,
             width=timedelta(days=1),
-            color="b",
-            alpha=0.4,
+            color=theme.up_color,
             label="Total Volume",
         )
-        axes[0].bar(
+        ax.bar(
             df["date"],
             df["short_volume"] / 1_000_000,
             width=timedelta(days=1),
-            color="r",
-            alpha=0.4,
+            color=theme.down_color,
             label="Short Volume",
         )
 
-        axes[0].set_ylabel("Volume (1M)")
-        ax2 = axes[0].twinx()
+        ax.set_ylabel("Volume (1M)")
+
         ax2.plot(
-            df["date"].values, prices[len(prices) - len(df) :], c="k", label="Price"
+            df["date"].values,
+            prices[len(prices) - len(df) :],  # noqa: E203
+            label="Price",
         )
         ax2.set_ylabel("Price ($)")
 
-        lines, labels = axes[0].get_legend_handles_labels()
+        lines, labels = ax.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax2.legend(lines + lines2, labels + labels2, loc="upper left")
 
-        axes[0].set_xlim(
+        ax.set_xlim(
             df["date"].values[max(0, len(df) - num)],
             df["date"].values[len(df) - 1],
         )
 
-        axes[0].grid()
-        axes[0].ticklabel_format(style="plain", axis="y")
-        plt.title(f"Price vs Short Volume Interest for {ticker}")
-        plt.gcf().autofmt_xdate()
+        ax.ticklabel_format(style="plain", axis="y")
+        ax.set_title(f"Price vs Short Volume Interest for {ticker}")
 
-        axes[1].plot(
+        ax1.plot(
             df["date"].values,
             100 * df["short_volume%"],
-            c="green",
             label="Short Vol. %",
         )
 
-        axes[1].set_xlim(
+        ax1.set_xlim(
             df["date"].values[max(0, len(df) - num)],
             df["date"].values[len(df) - 1],
         )
-        axes[1].set_ylabel("Short Vol. %")
+        ax1.set_ylabel("Short Vol. %")
 
-        axes[1].grid(axis="y")
-        lines, labels = axes[1].get_legend_handles_labels()
-        axes[1].legend(lines, labels, loc="upper left")
-        axes[1].set_ylim([0, 100])
+        lines, labels = ax1.get_legend_handles_labels()
+        ax1.legend(lines, labels, loc="upper left")
+        ax1.set_ylim([0, 100])
 
-        if USE_ION:
-            plt.ion()
+        theme.style_twin_axes(ax, ax2)
+        theme.style_primary_axis(ax1)
 
-        plt.show()
-    print("")
+        if not external_axes:
+            theme.visualize_output()
+
+    console.print("")
 
     export_data(
         export,
@@ -243,7 +260,14 @@ def short_interest_volume(ticker: str, num: int, raw: bool, export: str):
     )
 
 
-def net_short_position(ticker: str, num: int, raw: bool, export: str):
+@log_start_end(log=logger)
+def net_short_position(
+    ticker: str,
+    num: int,
+    raw: bool,
+    export: str,
+    external_axes: Optional[List[plt.Axes]] = None,
+):
     """Plot net short position. [Source: Stockgrid]
 
     Parameters
@@ -256,6 +280,9 @@ def net_short_position(ticker: str, num: int, raw: bool, export: str):
         Flag to print raw data instead
     export : str
         Export dataframe data to csv,json,xlsx file
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (2 axis is expected in the list), by default None
+
     """
     df = stockgrid_model.get_net_short_position(ticker)
 
@@ -275,56 +302,58 @@ def net_short_position(ticker: str, num: int, raw: bool, export: str):
 
         df["dates"] = df["dates"].dt.date
 
-        print(
-            tabulate(
-                df.iloc[:num],
-                tablefmt="fancy_grid",
-                floatfmt=".2f",
-                headers=list(df.columns),
-                showindex=False,
-            )
+        print_rich_table(
+            df.iloc[:num],
+            headers=list(df.columns),
+            show_index=False,
+            title="Net Short Positions",
         )
 
     else:
-        fig = plt.figure(figsize=plot_autoscale(), dpi=PLOT_DPI)
 
-        ax = fig.add_subplot(111)
-        ax.bar(
+        # This plot has 2 axis
+        if not external_axes:
+            _, ax1 = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+            ax2 = ax1.twinx()
+        else:
+            if len(external_axes) != 2:
+                console.print("[red]Expected list of one axis item./n[/red]")
+                return
+            (ax1, ax2) = external_axes
+
+        ax1.bar(
             df["dates"],
             df["dollar_net_volume"] / 1_000,
-            color="r",
-            alpha=0.4,
+            color=theme.down_color,
             label="Net Short Vol. (1k $)",
         )
-        ax.set_ylabel("Net Short Vol. (1k $)")
+        ax1.set_ylabel("Net Short Vol. (1k $)")
 
-        ax2 = ax.twinx()
         ax2.plot(
             df["dates"].values,
             df["dollar_dp_position"],
-            c="tab:blue",
+            c=theme.up_color,
             label="Position (1M $)",
         )
         ax2.set_ylabel("Position (1M $)")
 
-        lines, labels = ax.get_legend_handles_labels()
+        lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax2.legend(lines + lines2, labels + labels2, loc="upper left")
 
-        ax.set_xlim(
+        ax1.set_xlim(
             df["dates"].values[max(0, len(df) - num)],
             df["dates"].values[len(df) - 1],
         )
 
-        ax.grid()
-        plt.title(f"Net Short Vol. vs Position for {ticker}")
-        plt.gcf().autofmt_xdate()
+        ax1.set_title(f"Net Short Vol. vs Position for {ticker}")
 
-        if USE_ION:
-            plt.ion()
+        theme.style_twin_axes(ax1, ax2)
 
-        plt.show()
-    print("")
+        if not external_axes:
+            theme.visualize_output()
+
+    console.print("")
 
     export_data(
         export,

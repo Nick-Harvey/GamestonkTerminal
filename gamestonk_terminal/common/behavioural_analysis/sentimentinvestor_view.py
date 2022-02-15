@@ -1,217 +1,205 @@
 """SentimentInvestor View"""
 __docformat__ = "numpy"
 
-from typing import List
-
-import matplotlib.dates as mdates
-import pandas as pd
-import seaborn as sns
-import tabulate
-from colorama import Style
+import logging
+import os
+from typing import Optional, List
+from datetime import datetime
 from matplotlib import pyplot as plt
-from sentipy.sentipy import Sentipy
+from matplotlib.lines import Line2D
+import pandas as pd
 
-from gamestonk_terminal import config_terminal as cfg
-from gamestonk_terminal.common.behavioural_analysis import sentimentinvestor_model
-from gamestonk_terminal.common.behavioural_analysis.sentimentinvestor_model import (
-    _Boundary,
-    _Metric,
-)
+from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
-from gamestonk_terminal.helper_funcs import plot_autoscale
-
-sentipy: Sentipy = Sentipy(
-    token=cfg.API_SENTIMENTINVESTOR_TOKEN, key=cfg.API_SENTIMENTINVESTOR_KEY
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.common.behavioural_analysis import sentimentinvestor_model
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import (
+    export_data,
+    print_rich_table,
+    plot_autoscale,
 )
-"""Initialise SentiPy with the user's API token and key"""
-
-pd.plotting.register_matplotlib_converters()
-
-# TODO: Make code more consisnet with rest of repository
 
 
-def display_top(metric: str, limit: int):
-    """Displays top stocks from sentimentinvestor based on metric [Source: sentimentinvestor]
-
-    Parameters
-    ----------
-    metric : str
-        Metric to get top for
-    limit : int
-        Number of tickers to get
-    """
-    table = sentimentinvestor_model.get_top(metric, limit)
-    print(tabulate.tabulate(table, headers=["Rank", "Ticker", metric], floatfmt=".3f"))
-    print("")
+logger = logging.getLogger(__name__)
 
 
-def _tabulate_metrics(ticker: str, metrics_list: List[_Metric]):
-    """Tabulates sentiment investor data"""
-    table_data = []
-    table_headers = [
-        f"{Style.BRIGHT}{ticker}{Style.RESET_ALL} Metrics",
-        "vs Past 7 Days",
-        "Value",
-        "Description",
-    ]
-
-    for metric in metrics_list:
-        table_data.append(metric.visualise())
-
-    return tabulate.tabulate(table_data, table_headers, tablefmt="grid")
-
-
-def _customise_plot() -> None:
-    """Customizes sentimentinvestor plot"""
-    sns.set(
-        font="Arial",
-        style="darkgrid",
-        rc={
-            "axes.axisbelow": False,
-            "axes.edgecolor": "lightgrey",
-            "axes.facecolor": "None",
-            "axes.grid": False,
-            "axes.labelcolor": "dimgrey",
-            "axes.spines.right": False,
-            "axes.spines.top": False,
-            "figure.facecolor": "white",
-            "lines.solid_capstyle": "round",
-            "patch.edgecolor": "w",
-            "patch.force_edgecolor": True,
-            "text.color": "dimgrey",
-            "xtick.bottom": False,
-            "xtick.color": "dimgrey",
-            "xtick.direction": "out",
-            "xtick.top": False,
-            "ytick.color": "dimgrey",
-            "ytick.direction": "out",
-            "ytick.left": False,
-            "ytick.right": False,
-        },
-    )
-    sns.despine(left=True, bottom=True)
-    sns.color_palette("pastel")
-    plt.legend(frameon=False)
-
-
-def display_metrics(ticker: str) -> None:
-    """Display sentiment investor metrics for stock ticker"""
-    if not sentipy.supported(ticker):
-        print("This stock is not supported by the SentimentInvestor API.")
-        return
-
-    metric_values = sentimentinvestor_model.get_metrics(ticker)
-
-    if not metric_values:
-        print("No data available or an error occurred.")
-        return
-
-    print(_tabulate_metrics(ticker, metric_values))
-    print()
-
-
-def display_social(ticker: str) -> None:
-    """Display sentiment investor social metrics for ticker"""
-    if not sentipy.supported(ticker):
-        print("This stock is not supported by the SentimentInvestor API.")
-        return
-
-    metric_values = sentimentinvestor_model.get_socials(ticker)
-
-    if not metric_values:
-        print("No data available or an error occurred.")
-        return
-
-    print(_tabulate_metrics(ticker, metric_values))
-    print("")
-
-
+@log_start_end(log=logger)
 def display_historical(
-    ticker: str, sort_param: str, sort_dir: str, metric: str
-) -> None:
-    """Show historical sentiment from sentimentinvestor [Source: sentimentinvestor]
+    ticker: str,
+    start: str,
+    end: str,
+    export: str = "",
+    number: int = 100,
+    raw: bool = False,
+    limit: int = 10,
+    external_axes: Optional[List[plt.Axes]] = None,
+):
+    """Display historical sentiment data of a ticker,
+    and plot a chart with RHI and AHI.
 
     Parameters
     ----------
-    ticker : str
-        Stock ticker
-    sort_param : str
-        Parameter to sort table by
-    sort_dir : str
-        Direction for sorting
-    metric : str
-        Metric to get data for. Either 'sentiment', 'AHI', 'RHI', 'SGP'
+    ticker: str
+        Ticker to view sentiment data
+    start: str
+        Initial date like string or unix timestamp (e.g. 2021-12-21)
+    end: str
+        End date like string or unix timestamp (e.g. 2022-01-15)
+    number : int
+        Number of results returned by API call
+        Maximum 250 per api call
+    raw: boolean
+        Whether to display raw data, by default False
+    limit: int
+        Number of results display on the terminal
+        Default: 10
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (2 axis is expected in the list), by default None
+    Returns
+    -------
     """
-    if not sentipy.supported(ticker):
-        print("This stock is not supported by the SentimentInvestor API.")
-        return
 
-    df = sentimentinvestor_model.get_historical(ticker, metric)
+    supported_ticker = sentimentinvestor_model.check_supported_ticker(ticker)
+
+    # Check to see if the ticker is supported
+    if not supported_ticker:
+        console.print(
+            f"[red]Ticker {ticker} not supported. Please try another one![/red]\n"
+        )
+        return
+    df = sentimentinvestor_model.get_historical(ticker, start, end, number)
 
     if df.empty:
-        print("The dataset is empty, something must have gone wrong")
+        console.print("[red]Error in Sentiment Investor request[/red]\n")
         return
 
-    _customise_plot()
+    # This plot has 2 axis
+    if external_axes is None:
+        _, ax1 = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
+        ax2 = ax1.twinx()
+    else:
+        if len(external_axes) != 2:
+            console.print("[red]Expected list of 2 axis item.[/red]\n")
+            return
+        (ax1, ax2) = external_axes
 
-    # use seaborn to lineplot
-    ax = sns.lineplot(
-        data=df,
-        x="date",
-        y=metric,
-        legend=False,
-        label=[metric],
+    ax1.plot(df.index, df["RHI"], color=theme.get_colors()[0])
+
+    ax2.plot(df.index, df["AHI"], color=theme.get_colors(reverse=True)[0])
+
+    ax1.set_ylabel("RHI")
+    ax1.set_title("Hourly-level data of RHI and AHI")
+    ax1.set_xlim(df.index[0], df.index[-1])
+    theme.style_primary_axis(ax1)
+    ax1.yaxis.set_label_position("left")
+
+    ax2.set_ylabel("AHI")
+
+    theme.style_primary_axis(ax2)
+    ax2.yaxis.set_label_position("right")
+    ax2.grid(visible=False)
+
+    # Manually construct the chart legend
+    colors = [theme.get_colors()[0], theme.get_colors(reverse=True)[0]]
+    lines = [Line2D([0], [0], color=c) for c in colors]
+    labels = ["RHI", "AHI"]
+    ax2.legend(lines, labels)
+
+    if external_axes is None:
+        theme.visualize_output()
+
+    export_data(
+        export,
+        os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),
+        "hist",
+        df,
     )
 
-    # always show zero on the y-axis
-    plt.ylim(bottom=0)
+    RAW_COLS = ["twitter", "stocktwits", "yahoo", "likes", "RHI", "AHI"]
 
-    # set the x-axis date formatting
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%x"))
+    if raw:
+        df.index = df.index.strftime("%Y-%m-%d %H:%M")
+        df.index.name = "Time"
 
-    # scale the plot appropriately
-    plt.gcf().set_size_inches(plot_autoscale())
-    plt.gcf().set_dpi(PLOT_DPI)
-    plt.gcf().autofmt_xdate()
+        print_rich_table(
+            df[RAW_COLS].head(limit),
+            headers=[
+                "Twitter",
+                "Stocktwits",
+                "Yahoo",
+                "Likes",
+                "RHI",
+                "AHI",
+            ],
+            show_index=True,
+            index_name="Time",
+            title="Historical Sentiment Data",
+        )
 
-    # fill below the line
-    plt.fill_between(df.date, df[metric], alpha=0.3)
 
-    # add title e.g. AAPL sentiment since 22/07/21
-    plt.title(f"{ticker} {metric} since {min(df.date).strftime('%x')}")
+def display_trending(
+    start: datetime,
+    hour: int,
+    export: str,
+    number: int = 10,
+    limit: int = 10,
+):
+    """Display most talked about tickers within
+    the last hour together with their sentiment data.
 
-    plt.show()
+    Parameters
+    ----------
+    start: datetime
+        Datetime object (e.g. datetime(2021, 12, 21)
+    hour: int
+        Hour of the day in 24-hour notation (e.g. 14)
+    number : int
+        Number of results returned by API call
+        Maximum 250 per api call
+    limit: int
+        Number of results display on the terminal
+        Default: 10
+    -------
+    Returns
+        None
+    """
 
-    ###
+    df = sentimentinvestor_model.get_trending(start, hour, number)
 
-    boundary = _Boundary(0, max(df[metric].max(), 2 * df[metric].mean()))
+    if df.empty:
+        console.print("[red]Error in Sentiment Investor request.\n[/red]")
 
-    # average for each day
-    aggregated = df.resample("D", on="date").mean()
+    else:
+        export_data(
+            export,
+            os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),
+            "trend",
+            df,
+        )
 
-    # reverse the ordering if requested
-    aggregated.sort_values(
-        metric if sort_param == "value" else sort_param,
-        axis=0,
-        ascending=sort_dir == "asc",
-        inplace=True,
-    )
+        RAW_COLS = [
+            "total",
+            "twitter",
+            "stocktwits",
+            "yahoo",
+            "likes",
+            "RHI",
+            "AHI",
+        ]
 
-    # format the date according to user's locale
-    aggregated.index = aggregated.index.strftime("%x")
+        RAW_COLS = [col for col in RAW_COLS if col in df.columns.tolist()]
 
-    # apply coloring to every value
-    aggregated[metric] = [
-        boundary.categorise(value)[0] + str(value) + Style.RESET_ALL
-        for value in aggregated[metric]
-    ]
+        df.ticker = df.ticker.str.upper()
+        df = df.set_index("ticker")
 
-    print(
-        tabulate.tabulate(
-            aggregated,
-            headers=["Day", f"average {metric}"],
-            tablefmt="psql",
-            floatfmt=".3f",
-        ),
-        "\n",
-    )
+        df.timestamp_date = pd.to_datetime(df.timestamp_date)
+        timestamp = df.timestamp_date[0].strftime("%Y-%m-%d %H:%M")
+
+        print_rich_table(
+            df[RAW_COLS].head(limit),
+            headers=[col.upper() for col in RAW_COLS],
+            show_index=True,
+            index_name="TICKER",
+            title=f"Most trending stocks at {timestamp}",
+        )

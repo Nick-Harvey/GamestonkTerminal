@@ -2,53 +2,53 @@
 """Main Terminal Module"""
 __docformat__ = "numpy"
 
-import argparse
-import difflib
 import sys
+import os
+import difflib
+import logging
+import argparse
+from typing import List
+import pytz
 
 from prompt_toolkit.completion import NestedCompleter
-
-from gamestonk_terminal import config_terminal
+from gamestonk_terminal.rich_config import console
+from gamestonk_terminal.parent_classes import BaseController
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.helper_funcs import (
     get_flair,
-    system_clear,
-    MENU_RESET,
-    MENU_GO_BACK,
-    MENU_QUIT,
+    get_user_timezone_or_invalid,
+    replace_user_timezone,
 )
+
+from gamestonk_terminal.loggers import setup_logging
 from gamestonk_terminal.menu import session
+
 from gamestonk_terminal.terminal_helper import (
     about_us,
     bootup,
-    check_api_keys,
+    welcome_message,
     print_goodbye,
     reset,
     update_terminal,
+    suppress_stdout,
+    is_reset,
 )
 
 # pylint: disable=too-many-public-methods,import-outside-toplevel
 
+logger = logging.getLogger(__name__)
 
-class TerminalController:
+
+class TerminalController(BaseController):
     """Terminal Controller class"""
 
-    CHOICES = [
-        "cls",
-        "?",
-        "help",
-        "q",
-        "quit",
-    ]
-
     CHOICES_COMMANDS = [
-        "reset",
         "update",
         "about",
         "keys",
+        "settings",
+        "tz",
     ]
-
-    CHOICES_SHORTHAND_MENUS = ["s", "e", "c", "p", "f", "rp", "rs"]
     CHOICES_MENUS = [
         "stocks",
         "economy",
@@ -56,277 +56,393 @@ class TerminalController:
         "portfolio",
         "forex",
         "etf",
-        "reports",
-        "resources",
+        "jupyter",
+        "funds",
+        "alternative",
+        "custom",
     ]
 
-    CHOICES += CHOICES_COMMANDS
-    CHOICES += CHOICES_MENUS
-    CHOICES += CHOICES_SHORTHAND_MENUS
+    PATH = "/"
 
-    def __init__(self):
+    all_timezones = pytz.all_timezones
+
+    def __init__(self, jobs_cmds: List[str] = None):
         """Constructor"""
+        super().__init__(jobs_cmds)
+
+        if session and gtff.USE_PROMPT_TOOLKIT:
+            choices: dict = {c: None for c in self.controller_choices}
+            choices["tz"] = {c: None for c in self.all_timezones}
+            self.completer = NestedCompleter.from_nested_dict(choices)
+
+        self.queue: List[str] = list()
+
+        if jobs_cmds:
+            self.queue = " ".join(jobs_cmds).split("/")
+
         self.update_succcess = False
-        self.t_parser = argparse.ArgumentParser(add_help=False, prog="terminal")
-        self.t_parser.add_argument(
-            "cmd",
-            choices=self.CHOICES,
-        )
-        self.completer = NestedCompleter.from_nested_dict(
-            {c: None for c in self.CHOICES}
-        )
 
     def print_help(self):
         """Print help"""
-        help_text = """
-What do you want to do?
-    cls         clear screen
-    ?/help      show this menu again
-    update      update terminal from remote
-    keys        check for defined api keys
-    reset       reset terminal and reload configs
-    about       about us
-    q(uit)      to abandon the program
+        console.print(
+            text=f"""
+[info]Multiple jobs queue (where each '/' denotes a new command).[/info]
+    E.g. '/stocks $ disc/ugs -n 3/../load tsla/candle'
 
->>  stocks
->>  crypto
->>  etf
->>  economy
->>  forex
->>  portfolio
->>  reports
->>  resources
-    """
-        print(help_text)
+[info]If you want to jump from crypto/ta to stocks you can use an absolute path that starts with a slash (/).[/info]
+    E.g. '/crypto/ta $ /stocks'
 
-    def switch(self, an_input: str):
-        """Process and dispatch input
+[info]The previous logic also holds for when launching the terminal.[/info]
+    E.g. '$ python terminal.py /stocks/disc/ugs -n 3/../load tsla/candle'
 
-        Returns
-        -------
-        True, False or None
-            False - quit the menu
-            True - quit the program
-            None - continue in the menu
-        """
+[info]The main commands you should be aware when navigating through the terminal are:[/info][cmds]
+    cls             clear the screen
+    help / h / ?    help menu
+    quit / q / ..   quit this menu and go one menu above
+    exit            exit the terminal
+    reset / r       reset the terminal and reload configs from the current location
+    resources       only available on main contexts (not sub-menus)
 
-        # Empty command
-        if not an_input:
-            print("")
-            return None
+    about           about us
+    update          update terminal automatically
+    tz              set different timezone[/cmds][menu]
+>   settings        set feature flags and style charts
+>   keys            set API keys and check their validity[/menu]
 
-        (known_args, other_args) = self.t_parser.parse_known_args(an_input.split())
-
-        # Help menu again
-        if known_args.cmd == "?":
-            self.print_help()
-            return None
-
-        # Clear screen
-        if known_args.cmd == "cls":
-            system_clear()
-            return None
-
-        return getattr(
-            self, "call_" + known_args.cmd, lambda: "Command not recognized!"
-        )(other_args)
-
-    def call_help(self, _):
-        """Process Help command"""
-        self.print_help()
-
-    def call_quit(self, _):
-        """Process Quit command - quit the program"""
-        return True
-
-    def call_q(self, _):
-        """Process Quit command - quit the program"""
-        return True
-
-    # COMMANDS
-    def call_reset(self, _):
-        """Process reset command"""
-        return True
+[param]Timezone:[/param] {get_user_timezone_or_invalid()}
+[menu]
+>   stocks
+>   crypto
+>   etf
+>   economy
+>   forex
+>   funds
+>   alternative
+>   portfolio
+>   jupyter
+>   custom[/menu]
+    """,
+            menu="Home",
+        )
 
     def call_update(self, _):
         """Process update command"""
         self.update_succcess = not update_terminal()
-        return True
 
     def call_keys(self, _):
         """Process keys command"""
-        check_api_keys()
+        from gamestonk_terminal.keys_controller import KeysController
+
+        self.queue = self.load_class(KeysController, self.queue)
+
+    def call_settings(self, _):
+        """Process settings command"""
+        from gamestonk_terminal.settings_controller import SettingsController
+
+        self.queue = self.load_class(SettingsController, self.queue)
 
     def call_about(self, _):
         """Process about command"""
         about_us()
 
-    # MENUS
     def call_stocks(self, _):
         """Process stocks command"""
-        from gamestonk_terminal.stocks import stocks_controller
+        from gamestonk_terminal.stocks.stocks_controller import StocksController
 
-        return stocks_controller.menu()
-
-    def call_s(self, _):
-        """Process stocks command"""
-        return self.call_stocks(_)
+        self.queue = self.load_class(StocksController, self.queue)
 
     def call_crypto(self, _):
         """Process crypto command"""
-        from gamestonk_terminal.cryptocurrency import crypto_controller
+        from gamestonk_terminal.cryptocurrency.crypto_controller import CryptoController
 
-        return crypto_controller.menu()
-
-    def call_c(self, _):
-        """Process crypto command"""
-        return self.call_crypto(_)
+        self.queue = self.load_class(CryptoController, self.queue)
 
     def call_economy(self, _):
         """Process economy command"""
-        from gamestonk_terminal.economy import economy_controller
+        from gamestonk_terminal.economy.economy_controller import EconomyController
 
-        return economy_controller.menu()
-
-    def call_e(self, _):
-        """Process economy command"""
-        return self.call_economy(_)
+        self.queue = self.load_class(EconomyController, self.queue)
 
     def call_etf(self, _):
         """Process etf command"""
-        from gamestonk_terminal.etf import etf_controller
+        from gamestonk_terminal.etf.etf_controller import ETFController
 
-        return etf_controller.menu()
+        self.queue = self.load_class(ETFController, self.queue)
+
+    def call_funds(self, _):
+        """Process etf command"""
+        from gamestonk_terminal.mutual_funds.mutual_fund_controller import (
+            FundController,
+        )
+
+        self.queue = self.load_class(FundController, self.queue)
 
     def call_forex(self, _):
         """Process forex command"""
-        from gamestonk_terminal.forex import forex_controller
+        from gamestonk_terminal.forex.forex_controller import ForexController
 
-        return forex_controller.menu()
+        self.queue = self.load_class(ForexController, self.queue)
 
-    def call_f(self, _):
-        """Process forex command"""
-        return self.call_forex(_)
+    def call_jupyter(self, _):
+        """Process jupyter command"""
+        from gamestonk_terminal.jupyter.jupyter_controller import JupyterController
 
-    def call_reports(self, _):
-        """Process reports command"""
-        from gamestonk_terminal.reports import reports_controller
+        self.queue = self.load_class(JupyterController, self.queue)
 
-        return reports_controller.menu()
+    def call_alternative(self, _):
+        """Process alternative command"""
+        from gamestonk_terminal.alternative.alt_controller import (
+            AlternativeDataController,
+        )
 
-    def call_rp(self, _):
-        """Process reports command"""
-        return self.call_reports(_)
+        self.queue = self.load_class(AlternativeDataController, self.queue)
 
-    def call_resources(self, _):
-        """Process resources command"""
-        from gamestonk_terminal.resources import resources_controller
+    def call_custom(self, _):
+        """Process custom command"""
+        from gamestonk_terminal.custom.custom_controller import (
+            CustomDataController,
+        )
 
-        return resources_controller.menu()
-
-    def call_rs(self, _):
-        """Process resources command"""
-        return self.call_resources(_)
+        self.queue = CustomDataController(self.queue).menu()
 
     def call_portfolio(self, _):
         """Process portfolio command"""
-        from gamestonk_terminal.portfolio import portfolio_controller
+        from gamestonk_terminal.portfolio.portfolio_controller import (
+            PortfolioController,
+        )
 
-        return portfolio_controller.menu()
+        self.queue = self.load_class(PortfolioController, self.queue)
 
-    def call_p(self, _):
-        """Process portfolio command"""
-        return self.call_portfolio(_)
+    def call_tz(self, other_args: List[str]):
+        """Process tz command"""
+        other_args.append(self.queue[0])
+        self.queue = self.queue[1:]
+        replace_user_timezone("/".join(other_args))
 
 
-def terminal(menu_prior_to_reset=""):
+def terminal(jobs_cmds: List[str] = None):
     """Terminal Menu"""
+    setup_logging()
+
+    logger.info("Terminal started")
+
+    ret_code = 1
+    t_controller = TerminalController(jobs_cmds)
+    an_input = ""
 
     bootup()
-    process_input = False
-    t_controller = TerminalController()
-
-    if config_terminal.DEFAULT_CONTEXT or menu_prior_to_reset:
-        if (
-            config_terminal.DEFAULT_CONTEXT in t_controller.CHOICES_MENUS
-            or menu_prior_to_reset in t_controller.CHOICES_MENUS
-        ):
-            try:
-                print("")
-                process_input = t_controller.switch(
-                    menu_prior_to_reset or config_terminal.DEFAULT_CONTEXT.lower()
-                )
-                # Check if the user wants to reset application
-                if process_input == MENU_RESET:
-                    ret_code = reset(menu_prior_to_reset)
-                    if ret_code != 0:
-                        print_goodbye()
-
-            except SystemExit:
-                print("")
-        else:
-            print("\nInvalid DEFAULT_CONTEXT config selected!", "\n")
-
-    if process_input not in (MENU_QUIT, MENU_RESET):
+    if not jobs_cmds:
+        welcome_message()
         t_controller.print_help()
 
-        while True:
-            if gtff.ENABLE_QUICK_EXIT:
-                print("Quick exit enabled")
+    while ret_code:
+        if gtff.ENABLE_QUICK_EXIT:
+            console.print("Quick exit enabled")
+            break
+
+        # There is a command in the queue
+        if t_controller.queue and len(t_controller.queue) > 0:
+            # If the command is quitting the menu we want to return in here
+            if t_controller.queue[0] in ("q", "..", "quit"):
+                print_goodbye()
                 break
 
+            if gtff.ENABLE_EXIT_AUTO_HELP and len(t_controller.queue) > 1:
+                t_controller.queue = t_controller.queue[1:]
+
+            # Consume 1 element from the queue
+            an_input = t_controller.queue[0]
+            t_controller.queue = t_controller.queue[1:]
+
+            # Print the current location because this was an instruction and we want user to know what was the action
+            if an_input and an_input.split(" ")[0] in t_controller.CHOICES_COMMANDS:
+                console.print(f"{get_flair()} / $ {an_input}")
+
+        # Get input command from user
+        else:
+            # Get input from user using auto-completion
             if session and gtff.USE_PROMPT_TOOLKIT:
-                an_input = session.prompt(
-                    f"{get_flair()}> ", completer=t_controller.completer
-                )
-
-            else:
-                an_input = input(f"{get_flair()}> ")
-
-            # Is command empty
-            if not an_input:
-                print("")
-                continue
-
-            # Process list of commands selected by user
-            try:
-                process_input = t_controller.switch(an_input)
-                # MENU_GO_BACK - Show main context menu again
-                # MENU_QUIT - Quit terminal
-                # MENU_RESET - Reset terminal and go back to same previous menu
-
-                if process_input == MENU_GO_BACK:
-                    t_controller.print_help()
-                elif process_input in (MENU_QUIT, MENU_RESET):
+                try:
+                    an_input = session.prompt(
+                        f"{get_flair()} / $ ",
+                        completer=t_controller.completer,
+                        search_ignore_case=True,
+                    )
+                except KeyboardInterrupt:
+                    print_goodbye()
                     break
+            # Get input from user without auto-completion
+            else:
+                an_input = input(f"{get_flair()} / $ ")
 
-            except SystemExit:
-                print("The command selected doesn't exist\n")
-                similar_cmd = difflib.get_close_matches(
-                    an_input, t_controller.CHOICES, n=1, cutoff=0.7
-                )
-                if similar_cmd:
-                    print(f"Did you mean '{similar_cmd[0]}'?\n")
-                    continue
+        try:
+            # Process the input command
+            t_controller.queue = t_controller.switch(an_input)
+            if an_input in ("q", "quit", "..", "exit"):
+                print_goodbye()
+                break
 
-        if not gtff.ENABLE_QUICK_EXIT:
             # Check if the user wants to reset application
-            if (
-                an_input == "reset"
-                or t_controller.update_succcess
-                or process_input == MENU_RESET
-            ):
-                ret_code = reset(an_input if an_input != "reset" else "")
+            if an_input in ("r", "reset") or t_controller.update_succcess:
+                ret_code = reset(t_controller.queue if t_controller.queue else [])
                 if ret_code != 0:
                     print_goodbye()
+                    break
+
+        except SystemExit:
+            console.print(
+                f"\nThe command '{an_input}' doesn't exist on the / menu", end=""
+            )
+            similar_cmd = difflib.get_close_matches(
+                an_input.split(" ")[0] if " " in an_input else an_input,
+                t_controller.controller_choices,
+                n=1,
+                cutoff=0.7,
+            )
+            if similar_cmd:
+                if " " in an_input:
+                    candidate_input = (
+                        f"{similar_cmd[0]} {' '.join(an_input.split(' ')[1:])}"
+                    )
+                    if candidate_input == an_input:
+                        an_input = ""
+                        t_controller.queue = []
+                        console.print("\n")
+                        continue
+                    an_input = candidate_input
+                else:
+                    an_input = similar_cmd[0]
+
+                console.print(f" Replacing by '{an_input}'.")
+                t_controller.queue.insert(0, an_input)
             else:
-                print_goodbye()
+                console.print("\n")
+
+
+# TODO: if test_mode is true add exit to the end
+def run_scripts(path: str, test_mode: bool = False):
+    """Runs a given .gst scripts
+
+    Parameters
+    ----------
+    path : str
+        The location of the .gst file
+    test_mode : bool
+        Whether the terminal is in test mode
+    """
+    if os.path.isfile(path):
+        with open(path) as fp:
+            lines = [x for x in fp if not test_mode or not is_reset(x)]
+
+            if test_mode and "exit" not in lines[-1]:
+                lines.append("exit")
+
+            simulate_argv = f"/{'/'.join([line.rstrip() for line in lines])}"
+            file_cmds = simulate_argv.replace("//", "/home/").split()
+
+            # close the eyes if the user forgets the initial `/`
+            if len(file_cmds) > 0:
+                if file_cmds[0][0] != "/":
+                    file_cmds[0] = f"/{file_cmds[0]}"
+            terminal(file_cmds)
     else:
-        print_goodbye()
+        console.print(f"File '{path}' doesn't exist. Launching base terminal.\n")
+        if not test_mode:
+            terminal()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        terminal(sys.argv[1])
-    else:
-        terminal()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        prog="terminal",
+        description="The gamestonk terminal.",
+    )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        dest="debug",
+        action="store_true",
+        default=False,
+        help="Runs the terminal in debug mode.",
+    )
+    parser.add_argument(
+        "-p",
+        "--path",
+        help="The path or .gst file to run.",
+        dest="path",
+        nargs="+",
+        default="",
+        type=str,
+    )
+    parser.add_argument(
+        "-t",
+        "--test",
+        dest="test",
+        action="store_true",
+        default=False,
+        help="Whether to run in test mode.",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter",
+        help="Send a keyword to filter in file name",
+        dest="filter",
+        default="",
+        type=str,
+    )
+
+    if sys.argv[1:] and "-" not in sys.argv[1][0]:
+        sys.argv.insert(1, "-p")
+    ns_parser = parser.parse_args()
+
+    if ns_parser:
+        if ns_parser.test:
+            os.environ["DEBUG_MODE"] = "true"
+
+            if "gst" in ns_parser.path[0]:
+                files = ns_parser.path
+            else:
+                folder = os.path.join(
+                    os.path.abspath(os.path.dirname(__file__)), ns_parser.path[0]
+                )
+                files = [
+                    name
+                    for name in os.listdir(folder)
+                    if os.path.isfile(os.path.join(folder, name))
+                    and name.endswith(".gst")
+                    and (ns_parser.filter in f"{folder}/{name}")
+                ]
+            files.sort()
+            SUCCESSES = 0
+            FAILURES = 0
+            fails = {}
+            length = len(files)
+            i = 0
+            console.print("[green]Gamestonk Terminal Integrated Tests:\n[/green]")
+            for file in files:
+                console.print(f"{file}  {((i/length)*100):.1f}%")
+                try:
+                    with suppress_stdout():
+                        run_scripts(f"{ns_parser.path[0]}/{file}", test_mode=True)
+                    SUCCESSES += 1
+                except Exception as e:
+                    fails[f"{ns_parser.path[0]}{file}"] = e
+                    FAILURES += 1
+                i += 1
+            if fails:
+                console.print("\n[red]Failures:[/red]\n")
+                for key, value in fails.items():
+                    console.print(f"{key}: {value}\n")
+            console.print(
+                f"Summary: [green]Successes: {SUCCESSES}[/green] [red]Failures: {FAILURES}[/red]"
+            )
+        else:
+            if ns_parser.debug:
+                os.environ["DEBUG_MODE"] = "true"
+            if isinstance(ns_parser.path, list) and ns_parser.path[0].endswith(".gst"):
+                run_scripts(ns_parser.path[0])
+            elif ns_parser.path:
+                argv_cmds = list([" ".join(ns_parser.path).replace(" /", "/home/")])
+                terminal(argv_cmds)
+            else:
+                terminal()

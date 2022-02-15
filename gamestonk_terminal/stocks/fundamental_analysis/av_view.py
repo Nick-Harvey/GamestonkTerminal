@@ -1,16 +1,20 @@
 """ Alpha Vantage View """
 __docformat__ = "numpy"
 
+import logging
 import os
 
-from tabulate import tabulate
 import numpy as np
 
-from gamestonk_terminal import feature_flags as gtff
-from gamestonk_terminal.helper_funcs import export_data
+from gamestonk_terminal.decorators import log_start_end
+from gamestonk_terminal.helper_funcs import export_data, print_rich_table
+from gamestonk_terminal.rich_config import console
 from gamestonk_terminal.stocks.fundamental_analysis import av_model
 
+logger = logging.getLogger(__name__)
 
+
+@log_start_end(log=logger)
 def display_overview(ticker: str):
     """Alpha Vantage stock ticker overview
 
@@ -21,21 +25,21 @@ def display_overview(ticker: str):
     """
     df_fa = av_model.get_overview(ticker)
     if df_fa.empty:
-        print(f"No data found from alphavantage for {ticker}.\n")
+        console.print("No API calls left. Try me later", "\n")
         return
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df_fa.drop(index=["Description"]), headers=[], tablefmt="fancy_grid"
-            )
-        )
-    else:
-        print(df_fa.drop(index=["Description"]).to_string(header=False))
 
-    print(f"\nCompany Description:\n\n{df_fa.loc['Description'][0]}")
-    print("")
+    print_rich_table(
+        df_fa.drop(index=["Description"]),
+        headers=[""],
+        title=f"{ticker} Overview",
+        show_index=True,
+    )
+
+    console.print(f"\nCompany Description:\n\n{df_fa.loc['Description'][0]}")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_key(ticker: str):
     """Alpha Vantage key metrics
 
@@ -45,21 +49,20 @@ def display_key(ticker: str):
         Fundamental analysis ticker symbol
     """
     df_key = av_model.get_key_metrics(ticker)
-
     if df_key.empty:
-        print("Issue getting key metrics from alpha vantage.")
+        console.print("No API calls left. Try me later", "\n")
         return
 
-    if gtff.USE_TABULATE_DF:
-        print(tabulate(df_key, headers=[], tablefmt="fancy_grid"))
-    else:
-        print(df_key.to_string(header=False))
+    print_rich_table(
+        df_key, headers=[""], title=f"{ticker} Key Metrics", show_index=True
+    )
 
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_income_statement(
-    ticker: str, number: int, quarterly: bool = False, export: str = ""
+    ticker: str, limit: int, quarterly: bool = False, export: str = ""
 ):
     """Alpha Vantage income statement
 
@@ -67,26 +70,32 @@ def display_income_statement(
     ----------
     ticker : str
         Fundamental analysis ticker symbol
-    number: int
+    limit: int
         Number of past statements
     quarterly: bool
         Flag to get quarterly instead of annual
     export: str
         Format to export data
     """
-    df_income = av_model.get_income_statements(ticker, number, quarterly)
+    df_income = av_model.get_income_statements(ticker, limit, quarterly)
+    if df_income.empty:
+        console.print("No API calls left. Try me later", "\n")
+        return
 
-    if gtff.USE_TABULATE_DF:
-        print(tabulate(df_income, headers=df_income.columns, tablefmt="fancy_grid"))
-    else:
-        print(df_income.to_string())
+    print_rich_table(
+        df_income,
+        headers=list(df_income.columns),
+        title=f"{ticker} Income Statement",
+        show_index=True,
+    )
 
-    print("")
+    console.print("")
     export_data(export, os.path.dirname(os.path.abspath(__file__)), "income", df_income)
 
 
+@log_start_end(log=logger)
 def display_balance_sheet(
-    ticker: str, number: int, quarterly: bool = False, export: str = ""
+    ticker: str, limit: int, quarterly: bool = False, export: str = ""
 ):
     """Alpha Vantage income statement
 
@@ -94,28 +103,34 @@ def display_balance_sheet(
     ----------
     ticker : str
         Fundamental analysis ticker symbol
-    number: int
+    limit: int
         Number of past statements
     quarterly: bool
         Flag to get quarterly instead of annual
     export: str
         Format to export data
     """
-    df_balance = av_model.get_balance_sheet(ticker, number, quarterly)
+    df_balance = av_model.get_balance_sheet(ticker, limit, quarterly)
+    if df_balance.empty:
+        console.print("No API calls left. Try me later", "\n")
+        return
 
-    if gtff.USE_TABULATE_DF:
-        print(tabulate(df_balance, headers=df_balance.columns, tablefmt="fancy_grid"))
-    else:
-        print(df_balance.to_string())
+    print_rich_table(
+        df_balance,
+        headers=list(df_balance.columns),
+        title=f"{ticker} Balance Sheet",
+        show_index=True,
+    )
 
-    print("")
+    console.print("")
     export_data(
         export, os.path.dirname(os.path.abspath(__file__)), "balance", df_balance
     )
 
 
+@log_start_end(log=logger)
 def display_cash_flow(
-    ticker: str, number: int, quarterly: bool = False, export: str = ""
+    ticker: str, limit: int, quarterly: bool = False, export: str = ""
 ):
     """Alpha Vantage income statement
 
@@ -123,55 +138,57 @@ def display_cash_flow(
     ----------
     ticker : str
         Fundamental analysis ticker symbol
-    number: int
+    limit: int
         Number of past statements
     quarterly: bool
         Flag to get quarterly instead of annual
     export: str
         Format to export data
     """
-    df_cash = av_model.get_cash_flow(ticker, number, quarterly)
+    df_cash = av_model.get_cash_flow(ticker, limit, quarterly)
+    if df_cash.empty:
+        console.print("No API calls left. Try me later", "\n")
+        return
 
-    if gtff.USE_TABULATE_DF:
-        print(tabulate(df_cash, headers=df_cash.columns, tablefmt="fancy_grid"))
-    else:
-        print(df_cash.to_string())
+    print_rich_table(
+        df_cash,
+        headers=list(df_cash.columns),
+        title=f"{ticker} Balance Sheet",
+        show_index=True,
+    )
 
-    print("")
+    console.print("")
     export_data(export, os.path.dirname(os.path.abspath(__file__)), "cash", df_cash)
 
 
-def display_earnings(ticker: str, number: int, quarterly: bool = False):
+@log_start_end(log=logger)
+def display_earnings(ticker: str, limit: int, quarterly: bool = False):
     """Alpha Vantage earnings
 
     Parameters
     ----------
     ticker : str
         Fundamental analysis ticker symbol
-    number:int
+    limit:int
         Number of events to show
     quarterly: bool
         Flag to show quarterly instead of annual
     """
     df_fa = av_model.get_earnings(ticker, quarterly)
     if df_fa.empty:
-        print("Error getting earnings data.\n")
+        console.print("No API calls left. Try me later", "\n")
         return
-    if gtff.USE_TABULATE_DF:
-        print(
-            tabulate(
-                df_fa.head(number),
-                headers=df_fa.columns,
-                showindex=False,
-                tablefmt="fancy_grid",
-            )
-        )
-    else:
-        print(df_fa.head(n=number).T.to_string(header=False))
+    print_rich_table(
+        df_fa.head(limit),
+        headers=list(df_fa.columns),
+        show_index=False,
+        title=f"{ticker} Earnings",
+    )
 
-    print("")
+    console.print("")
 
 
+@log_start_end(log=logger)
 def display_fraud(ticker: str):
     """Fraud indicators for given ticker
     Parameters
@@ -179,33 +196,34 @@ def display_fraud(ticker: str):
     ticker : str
         Fundamental analysis ticker symbol
     """
-    ratios, zscore = av_model.get_fraud_ratios(ticker)
+    ratios, zscore, mckee = av_model.get_fraud_ratios(ticker)
 
     if ratios["MSCORE"] > -1.78:
-        chanceM = "high"
+        chance_m = "high"
     elif ratios["MSCORE"] > -2.22:
-        chanceM = "moderate"
+        chance_m = "moderate"
     else:
-        chanceM = "low"
+        chance_m = "low"
 
-    if zscore < 0.5:
-        chanceZ = "high"
-    else:
-        chanceZ = "low"
+    chance_z = "high" if zscore < 0.5 else "low"
+
+    chance_mcke = "low" if mckee < 0.5 else "high"
 
     if np.isnan(ratios["MSCORE"]) or np.isnan(zscore):
-        print("Data incomplete for this ticker. Unable to calculate risk")
+        console.print("Data incomplete for this ticker. Unable to calculate risk")
         return
 
-    print("Mscore Sub Stats:")
+    console.print("Mscore Sub Stats:")
     for rkey, value in ratios.items():
         if rkey != "MSCORE":
-            print("  ", f"{rkey} : {value:.2f}")
+            console.print("  ", f"{rkey} : {value:.2f}")
 
-    print(
+    console.print(
         "\n" + "MSCORE: ",
-        f"{ratios['MSCORE']:.2f} ({chanceM} chance of fraud)",
+        f"{ratios['MSCORE']:.2f} ({chance_m} chance of fraud)",
     )
 
-    print("ZSCORE: ", f"{zscore:.2f} ({chanceZ} chance of bankruptcy)", "\n")
+    console.print("ZSCORE: ", f"{zscore:.2f} ({chance_z} chance of bankruptcy)", "\n")
+
+    console.print("McKee: ", f"{mckee:.2f} ({chance_mcke} chance of bankruptcy)", "\n")
     return
