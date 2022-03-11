@@ -15,7 +15,7 @@ from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal import feature_flags as gtff
 from gamestonk_terminal.common.prediction_techniques import ets_model
 from gamestonk_terminal.common.prediction_techniques.pred_helper import (
-    price_prediction_backtesting_color,
+    lambda_price_prediction_backtesting_color,
     print_prediction_kpis,
     print_pretty_prediction,
 )
@@ -137,6 +137,9 @@ def display_exponential_smoothing(
         if (not s_end_date and len(external_axes) != 1) or (
             s_end_date and len(external_axes) != 3
         ):
+            logger.error(
+                "Expected list of 1 axis item or 3 axis items when backtesting"
+            )
             console.print(
                 "[red]Expected list of 1 axis item "
                 + "or 3 axis items when backtesting./n[/red]"
@@ -294,7 +297,9 @@ def display_exponential_smoothing(
 
             console.print("Time         Real [$]  x  Prediction [$]")
             console.print(
-                df_pred.apply(price_prediction_backtesting_color, axis=1).to_string()
+                df_pred.apply(
+                    lambda_price_prediction_backtesting_color, axis=1
+                ).to_string()
             )
         else:
             console.print(df_pred[["Real", "Prediction"]].round(2).to_string())

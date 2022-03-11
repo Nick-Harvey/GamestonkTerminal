@@ -4,6 +4,7 @@ __docformat__ = "numpy"
 import argparse
 from typing import List, Union, Optional
 import os
+import logging
 from warnings import simplefilter
 from datetime import timedelta
 import numpy as np
@@ -32,6 +33,7 @@ from gamestonk_terminal.config_terminal import theme
 from gamestonk_terminal.config_plot import PLOT_DPI
 from gamestonk_terminal.rich_config import console
 
+logger = logging.getLogger(__name__)
 
 register_matplotlib_converters()
 
@@ -432,7 +434,8 @@ def plot_data_predictions(
         )
     else:
         if len(external_axes) != 1:
-            console.print("[red]Expected list of 1 axis items./n[/red]")
+            logger.error("Expected list of one axis item")
+            console.print("[red]Expected list of 1 axis item./n[/red]")
             return
         (ax,) = external_axes
 
@@ -546,7 +549,7 @@ def plot_data_predictions(
         theme.visualize_output()
 
 
-def price_prediction_color(val: float, last_val: float) -> str:
+def lambda_price_prediction_color(val: float, last_val: float) -> str:
     """Set prediction to be a colored string"""
     if float(val) > last_val:
         return f"[green]{val:.2f} $[/green]"
@@ -560,7 +563,7 @@ def print_pretty_prediction(df_pred: pd.DataFrame, last_price: float):
         df_pred = pd.DataFrame(df_pred)
         df_pred.columns = ["pred"]
         df_pred["pred"] = df_pred["pred"].apply(
-            lambda x: price_prediction_color(x, last_val=last_price)
+            lambda x: lambda_price_prediction_color(x, last_val=last_price)
         )
         print_rich_table(
             df_pred,
@@ -590,7 +593,7 @@ def print_pretty_prediction_nn(df_pred: pd.DataFrame, last_price: float):
         console.print("Prediction:")
         console.print(
             df_pred.applymap(
-                lambda x: price_prediction_color(x, last_val=last_price)
+                lambda x: lambda_price_prediction_color(x, last_val=last_price)
             ).to_string()
         )
     else:
@@ -624,7 +627,7 @@ def print_prediction_kpis(real: np.ndarray, pred: np.ndarray):
     )
 
 
-def price_prediction_backtesting_color(val: list) -> str:
+def lambda_price_prediction_backtesting_color(val: list) -> str:
     """Add color to backtest data"""
     err_pct = 100 * (val[0] - val[1]) / val[1]
     if val[0] > val[1]:

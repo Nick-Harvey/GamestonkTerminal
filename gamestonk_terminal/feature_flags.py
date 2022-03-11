@@ -16,7 +16,7 @@ USE_CLEAR_AFTER_CMD = strtobool(os.getenv("GTFF_USE_CLEAR_AFTER_CMD", "False"))
 # Use coloring features
 USE_COLOR = strtobool(os.getenv("GTFF_USE_COLOR", "True"))
 
-# Select console flair (choose from config_terminal.py list)
+# Select console flair (choose from the list in helper_funcs.py)
 USE_FLAIR = os.getenv("GTFF_USE_FLAIR") or ":stars"
 
 # Add date and time to command line
@@ -57,3 +57,6 @@ ENABLE_RICH = strtobool(os.getenv("GTFF_ENABLE_RICH", "True"))
 
 # Use the colorful rich terminal
 ENABLE_RICH_PANEL = strtobool(os.getenv("GTFF_ENABLE_RICH_PANEL", "True"))
+
+# Check API KEYS before running a command
+ENABLE_CHECK_API = strtobool(os.getenv("GTFF_ENABLE_CHECK_API", "True"))

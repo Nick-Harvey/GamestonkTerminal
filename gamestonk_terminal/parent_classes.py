@@ -131,6 +131,10 @@ class BaseController(metaclass=ABCMeta):
     def print_help(self) -> None:
         raise NotImplementedError("Must override print_help")
 
+    def log_queue(self, message: str) -> None:
+        if self.queue:
+            logger.info("%s: %s", message, "/".join(self.queue))
+
     @log_start_end(log=logger)
     def switch(self, an_input: str) -> List[str]:
         """Process and dispatch input
@@ -140,9 +144,11 @@ class BaseController(metaclass=ABCMeta):
         List[str]
             List of commands in the queue to execute
         """
+
         # Empty command
         if not an_input:
-            console.print("")
+            pass
+        #    console.print("")
 
         # Navigation slash is being used first split commands
         elif "/" in an_input:
@@ -170,6 +176,9 @@ class BaseController(metaclass=ABCMeta):
                 elif known_args.cmd == "r":
                     known_args.cmd = "reset"
 
+            logger.info("CMD: %s", an_input)
+            self.log_queue("QUEUE")
+
             # This is what mutes portfolio issue
             getattr(
                 self,
@@ -177,7 +186,7 @@ class BaseController(metaclass=ABCMeta):
                 lambda _: "Command not recognized!",
             )(other_args)
 
-        logger.info("remaining queue: %s", "/".join(self.queue))
+        self.log_queue("QUEUE")
 
         return self.queue
 
@@ -210,13 +219,14 @@ class BaseController(metaclass=ABCMeta):
     def call_exit(self, _) -> None:
         # Not sure how to handle controller loading here
         """Process exit terminal command"""
+        console.print("")
         for _ in range(self.PATH.count("/")):
             self.queue.insert(0, "quit")
 
     @log_start_end(log=logger)
     def call_reset(self, _) -> None:
         """Process reset command. If you would like to have customization in the
-        reset process define a methom `custom_reset` in the child class.
+        reset process define a method `custom_reset` in the child class.
         """
         if self.PATH != "/":
             if self.custom_reset():
@@ -296,6 +306,11 @@ class BaseController(metaclass=ABCMeta):
                 self.queue = self.switch(an_input)
 
             except SystemExit:
+                logger.exception(
+                    "The command '%s' doesn't exist on the %s menu.",
+                    an_input,
+                    self.PATH,
+                )
                 console.print(
                     f"\nThe command '{an_input}' doesn't exist on the {self.PATH} menu.",
                     end="",
@@ -319,7 +334,7 @@ class BaseController(metaclass=ABCMeta):
                         an_input = candidate_input
                     else:
                         an_input = similar_cmd[0]
-
+                    logger.warning("Replacing by %s", an_input)
                     console.print(f" Replacing by '{an_input}'.")
                     self.queue.insert(0, an_input)
                 else:
